@@ -52,27 +52,35 @@ class WdtClient:
         sem = _get_semaphore(self.base_url)
         async with sem:
             try:
-                async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+                # Используем CookieJar для автоматического сбора cookie
+                jar = aiohttp.CookieJar(unsafe=True)
+                async with aiohttp.ClientSession(timeout=TIMEOUT, cookie_jar=jar) as session:
                     async with session.post(
                         url,
                         data={"username": self.username, "password": self.password},
-                        allow_redirects=False,
                     ) as resp:
-                        logger.debug("WDTT login %s → %d, cookies: %s", url, resp.status, dict(resp.cookies))
-                        if resp.status in (200, 302):
-                            cookies = {}
-                            for cookie in resp.cookies.values():
-                                cookies[cookie.key] = cookie.value
-                            if cookies:
-                                self._cookies = cookies
-                                logger.debug("WDTT login OK: %s", self.base_url)
-                                return True
-                            # Cookie может быть в Set-Cookie заголовке
-                            logger.warning("WDTT login: нет cookie в ответе")
-                            return resp.status == 200
-                        text = await resp.text()
-                        logger.warning("WDTT login failed: status=%d, body=%s", resp.status, text[:200])
-                        return False
+                        logger.debug("WDTT login %s → %d", url, resp.status)
+
+                        # Собираем cookie из jar
+                        cookies = {}
+                        for cookie in jar:
+                            cookies[cookie.key] = cookie.value
+
+                        if cookies:
+                            self._cookies = cookies
+                            logger.debug("WDTT login OK: %s, cookies: %s", self.base_url, list(cookies.keys()))
+                            return True
+
+                        # Фолбэк: пробуем из resp.cookies
+                        for cookie in resp.cookies.values():
+                            cookies[cookie.key] = cookie.value
+                        if cookies:
+                            self._cookies = cookies
+                            logger.debug("WDTT login OK (resp.cookies): %s", self.base_url)
+                            return True
+
+                        logger.warning("WDTT login: нет cookie в ответе")
+                        return resp.status == 200
             except Exception as e:
                 logger.error("WDTT login error: %s", e)
                 return False

@@ -358,12 +358,13 @@ async def cb_user_link(cq: CallbackQuery, config: Config):
         return
 
     users = data.get("users", [])
+    inbound = data.get("inbound", {})
     user = next((u for u in users if u.get("password") == password), None)
     if not user:
         await cq.answer("Пользователь не найден", show_alert=True)
         return
 
-    text = format_user_link(user)
+    text = format_user_link(user, inbound)
     kb = InlineKeyboardBuilder()
     kb.button(text="📷 QR", callback_data=f"user:qr:{password}")
     kb.button(text="◀️ Назад", callback_data=f"user:view:{password}")

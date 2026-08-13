@@ -131,18 +131,72 @@ def format_user_detail(user: dict, inbound: dict = None) -> str:
     return "\n".join(lines)
 
 
-def format_user_link(user: dict) -> str:
-    """Форматирует только ссылку пользователя."""
-    link = user.get("link", "")
+def format_user_link(user: dict, inbound: dict = None) -> str:
+    """Форматирует ссылки пользователя по типам клиентов."""
     comment = user.get("comment", "")
     pwd = user.get("password", "")
     label = comment if comment else pwd[:12]
 
-    lines = [f"<b>🔗 Ссылка — {label}</b>\n"]
-    if link:
-        lines.append(f"<code>{link}</code>")
-    else:
-        lines.append("Ссылка недоступна.")
+    # Данные из inbound
+    host = ""
+    dtls_port = 56000
+    wg_port = 56001
+    client_port = 9000
+    if inbound:
+        host = inbound.get("server_host", "") or ""
+        dtls_port = inbound.get("dtls_port", 56000)
+        wg_port = inbound.get("wg_port", 56001)
+        client_port = inbound.get("client_port", 9000)
+
+    # Если host не задан — берём из ссылки (add поле)
+    link = user.get("link", "")
+    if not host and link:
+        try:
+            import base64, json as _json
+            if link.startswith("wdtt://"):
+                payload = link[7:]
+                decoded = _json.loads(base64.b64decode(payload))
+                host = decoded.get("add", "")
+        except Exception:
+            pass
+
+    if not host:
+        host = "?"
+
+    # VK hash — пока пустой, т.к. API не возвращает его
+    vk_hash = ""
+
+    lines = [f"<b>🔗 Ссылки — {label}</b>\n"]
+
+    # Формируем colon-ссылки для разных клиентов
+    def _colon(local_port: int, hash_limit: int = 0, with_name: bool = False) -> str:
+        h = vk_hash
+        if hash_limit and h:
+            parts = h.split(",")
+            h = ",".join(parts[:hash_limit])
+        name_suffix = f"#{comment}" if (with_name and comment) else ""
+        return f"wdtt://{host}:{dtls_port}:{wg_port}:{local_port}:{pwd}:{h}{name_suffix}"
+
+    # iOS — VK Turn Proxy (1 hash, local=0)
+    ios_link = _colon(0, hash_limit=1)
+    lines.append(f"<b>iOS — VK Turn Proxy</b>")
+    lines.append(f"<code>{ios_link}</code>\n")
+
+    # Android — WDTT (up to 4 hashes, local=client_port)
+    android_link = _colon(client_port)
+    lines.append(f"<b>Android — WDTT</b>")
+    lines.append(f"<code>{android_link}</code>\n")
+
+    # PWDTT — Desktop Win/Linux (up to 4 hashes, with name)
+    desktop_link = _colon(0, with_name=True)
+    lines.append(f"<b>PWDTT — Desktop</b>")
+    lines.append(f"<code>{desktop_link}</code>\n")
+
+    # WDTT — Windows (up to 4 hashes, with name)
+    win_link = _colon(0, with_name=True)
+    lines.append(f"<b>WDTT — Windows</b>")
+    lines.append(f"<code>{win_link}</code>")
+
     return "\n".join(lines)
 
 
@@ -196,17 +250,45 @@ def format_services(status: dict) -> str:
 # ─── Xray ─────────────────────────────────────────────────────────────────────
 
 def format_xray_config(config: dict) -> str:
-    """Форматирует Xray конфиг."""
+    """Форматирует Xray конфиг (сокращённо — полный конфиг слишком длинный)."""
     import json
     lines = ["<b>📡 Xray конфиг</b>\n"]
+
+    # Показываем краткую сводку
+    inbounds = config.get("inbounds", [])
+    outbounds = config.get("outbounds", [])
+    routing = config.get("routing", {})
+    dns = config.get("dns", {})
+
+    lines.append(f"Inbounds: {len(inbounds)}")
+    for ib in inbounds[:5]:
+        proto = ib.get("protocol", "?")
+        port = ib.get("port", "?")
+        tag = ib.get("tag", "")
+        lines.append(f"  • {proto} :{port} ({tag})")
+
+    lines.append(f"\nOutbounds: {len(outbounds)}")
+    for ob in outbounds[:5]:
+        proto = ob.get("protocol", "?")
+        tag = ob.get("tag", "")
+        lines.append(f"  • {proto} ({tag})")
+
+    rules = routing.get("rules", [])
+    lines.append(f"\nRouting rules: {len(rules)}")
+    servers = dns.get("servers", [])
+    if servers:
+        lines.append(f"DNS: {', '.join(str(s) for s in servers[:3])}")
+
+    # Полный JSON — только если��ается
     try:
         pretty = json.dumps(config, indent=2, ensure_ascii=False)
-        # Обрезаем если слишком длинный
-        if len(pretty) > 3000:
-            pretty = pretty[:3000] + "\n..."
-        lines.append(f"<pre>{pretty}</pre>")
+        if len(pretty) <= 3000:
+            lines.append(f"\n<pre>{pretty}</pre>")
+        else:
+            lines.append(f"\n<i>Полный конфиг слишком длинный ({len(pretty)} символов)</i>")
     except Exception:
-        lines.append(f"<pre>{config}</pre>")
+        pass
+
     return "\n".join(lines)
 
 
