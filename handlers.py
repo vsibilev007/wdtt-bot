@@ -28,7 +28,7 @@ from export_utils import users_to_csv, users_to_xlsx
 from formatters import (
     format_status, format_users_list, format_user_detail, format_user_link,
     format_inbound, format_services, format_xray_config, format_xray_versions,
-    format_alerts, format_alert_log, ALERT_TYPES,
+    format_alerts, format_alert_log, format_online_sessions, ALERT_TYPES,
 )
 from keyboards import (
     main_menu_kb, dashboard_kb, users_list_kb, user_detail_kb, user_edit_kb,
@@ -143,6 +143,28 @@ async def cmd_id(message: Message):
     await message.answer(f"Ваш Telegram ID: <code>{message.from_user.id}</code>")
 
 
+@router.message(Command("help"))
+async def cmd_help(message: Message):
+    text = (
+        "<b>📖 Справка по командам</b>\n\n"
+        "<b>/start</b> — Приветствие и главное меню\n"
+        "<b>/menu</b> — Главное меню (Dashboard)\n"
+        "<b>/find запрос</b> — Поиск пользователя по паролю или комментарию\n"
+        "<b>/id</b> — Ваш Telegram ID\n"
+        "<b>/help</b> — Эта справка\n\n"
+        "<b>Меню бота:</b>\n"
+        "📊 <b>Dashboard</b> — статус сервисов, IP, количество пользователей\n"
+        "👥 <b>Пользователи</b> — список, создание, редактирование, удаление\n"
+        "🔧 <b>Inbound</b> — настройки подключения (порты, DNS)\n"
+        "🔄 <b>Сервисы</b> — перезапуск WDTT и Xray\n"
+        "📡 <b>Xray</b> — конфиг и версии Xray\n"
+        "🚨 <b>Алерты</b> — уведомления при проблемах\n"
+        "➕ <b>Новый клиент</b> — создание пользователя\n"
+        "📤 <b>Экспорт</b> — выгрузка в CSV/Excel\n"
+    )
+    await message.answer(text)
+
+
 # ─── /find ───────────────────────────────────────────────────────────────────
 
 @router.message(Command("find"))
@@ -208,6 +230,21 @@ async def cb_dashboard(cq: CallbackQuery, config: Config):
 @router.callback_query(F.data == "dashboard:refresh")
 async def cb_dashboard_refresh(cq: CallbackQuery, config: Config):
     await cb_dashboard(cq, config)
+
+
+@router.callback_query(F.data == "menu:online")
+async def cb_online_sessions(cq: CallbackQuery, config: Config):
+    client, srv = await get_client(cq.from_user.id, config)
+    status = await _api_call(cq, client.get_status)
+    if status is None:
+        return
+
+    text = format_online_sessions(status)
+    kb = InlineKeyboardBuilder()
+    kb.button(text="🔄 Обновить", callback_data="menu:online")
+    kb.button(text="◀️ Меню", callback_data="menu:main")
+    kb.adjust(2)
+    await _safe_edit(cq, text, kb.as_markup())
 
 
 # ─── Server select ───────────────────────────────────────────────────────────

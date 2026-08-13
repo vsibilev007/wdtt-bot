@@ -50,11 +50,38 @@ def format_status(obj: dict, server_name: str = "") -> str:
         lines.append("")
         lines.append("<b>Статистика:</b>")
         for key, val in stats.items():
-            # Пропускаем массив online — он слишком длинный
             if key == "online" and isinstance(val, list):
                 lines.append(f"  Онлайн сессий: {len(val)}")
                 continue
             lines.append(f"  {key}: {val}")
+
+    return "\n".join(lines)
+
+
+def format_online_sessions(obj: dict) -> str:
+    """Форматирует онлайн-сессии из stats.online."""
+    stats = obj.get("stats", {})
+    online = stats.get("online", [])
+
+    lines = ["<b>🟢 Онлайн сессии</b>\n"]
+
+    if not online:
+        lines.append("Нет активных сессий.")
+        return "\n".join(lines)
+
+    lines.append(f"Всего: {len(online)}\n")
+
+    for s in online:
+        user = s.get("user", "?")
+        ip = s.get("ip", "?")
+        mode = s.get("mode", "?")
+        device = s.get("device_id", "")
+        sessions = s.get("sessions", "1")
+
+        lines.append(f"<b>{user}</b>")
+        lines.append(f"  IP: {ip} | Режим: {mode} | Сессий: {sessions}")
+        if device:
+            lines.append(f"  Устройство: {device[:8]}…")
 
     return "\n".join(lines)
 
@@ -186,7 +213,8 @@ def format_user_link(user: dict, inbound: dict = None) -> str:
             parts = h.split(",")
             h = ",".join(parts[:hash_limit])
         name_suffix = f"#{comment}" if (with_name and comment) else ""
-        return f"wdtt://{host}:{dtls_port}:{wg_port}:{local_port}:{pwd}:{h}{name_suffix}"
+        link = f"wdtt://{host}:{dtls_port}:{wg_port}:{local_port}:{pwd}:{h}{name_suffix}"
+        return f'<a href="{link}">{link}</a>'
 
     # iOS — VK Turn Proxy (1 hash, local=0)
     ios_link = _colon(0, hash_limit=1)

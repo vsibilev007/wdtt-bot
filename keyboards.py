@@ -53,9 +53,10 @@ def main_menu_kb(
 
 def dashboard_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
+    kb.button(text="🟢 Онлайн", callback_data="menu:online")
     kb.button(text="🔄 Обновить", callback_data="dashboard:refresh")
     kb.button(text="◀️ Меню",     callback_data="menu:main")
-    kb.adjust(2)
+    kb.adjust(2, 1)
     return kb.as_markup()
 
 

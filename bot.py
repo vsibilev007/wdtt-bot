@@ -32,6 +32,7 @@ async def setup_bot_menu(bot: Bot):
         BotCommand(command="menu",    description="Главное меню"),
         BotCommand(command="find",    description="Поиск пользователя"),
         BotCommand(command="id",      description="Ваш Telegram ID"),
+        BotCommand(command="help",    description="Справка по командам"),
     ]
     await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
     await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
