@@ -281,7 +281,7 @@ async def cb_user_view(cq: CallbackQuery, config: Config):
         return
 
     users = data.get("users", [])
-    user = next((u for u in users if u.get("password") == password), None)
+    user = next((u for u in users if (u.get("password_key", "") or u.get("password", "")) == password), None)
     if not user:
         await cq.answer("Пользователь не найден", show_alert=True)
         return
@@ -305,7 +305,7 @@ async def cb_user_toggle(cq: CallbackQuery, config: Config):
         return
 
     users = data.get("users", [])
-    user = next((u for u in users if u.get("password") == password), None)
+    user = next((u for u in users if (u.get("password_key", "") or u.get("password", "")) == password), None)
     if not user:
         await cq.answer("Пользователь не найден", show_alert=True)
         return
@@ -359,7 +359,7 @@ async def cb_user_link(cq: CallbackQuery, config: Config):
 
     users = data.get("users", [])
     inbound = data.get("inbound", {})
-    user = next((u for u in users if u.get("password") == password), None)
+    user = next((u for u in users if (u.get("password_key", "") or u.get("password", "")) == password), None)
     if not user:
         await cq.answer("Пользователь не найден", show_alert=True)
         return
@@ -382,7 +382,7 @@ async def cb_user_qr(cq: CallbackQuery, config: Config):
         return
 
     users = data.get("users", [])
-    user = next((u for u in users if u.get("password") == password), None)
+    user = next((u for u in users if (u.get("password_key", "") or u.get("password", "")) == password), None)
     if not user:
         await cq.answer("Пользователь не найден", show_alert=True)
         return
