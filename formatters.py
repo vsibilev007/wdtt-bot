@@ -214,7 +214,7 @@ def format_user_link(user: dict, inbound: dict = None) -> str:
             h = ",".join(parts[:hash_limit])
         name_suffix = f"#{comment}" if (with_name and comment) else ""
         link = f"wdtt://{host}:{dtls_port}:{wg_port}:{local_port}:{pwd}:{h}{name_suffix}"
-        return f'<a href="{link}">{link}</a>'
+        return f"<code>{link}</code>"
 
     # iOS — VK Turn Proxy (1 hash, local=0)
     ios_link = _colon(0, hash_limit=1)
