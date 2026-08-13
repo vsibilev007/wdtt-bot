@@ -1,128 +1,434 @@
 # WDTT Manager Bot
 
-Telegram-бот для управления [WDTT VPN Panel](https://github.com/ildarmaga/wdtt).
+Telegram-бот для управления [WDTT VPN Panel](https://github.com/ildarmaga/wdtt) через Panel API.
+
+**Совместимость:** WDTT Panel (API v1+)
 
 ## Возможности
 
-- **Dashboard** — статус WDTT/Xray, IP, количество пользователей
-- **Пользователи** — список, создание, редактирование, удаление, вкл/выкл, сброс трафика
-- **Inbound** — просмотр и редактирование (порты, DNS, max_users)
-- **Сервисы** — перезапуск WDTT и Xray
-- **Xray** — просмотр конфига, список версий
+- **Управление пользователями** — создание, редактирование, удаление, вкл/выкл, сброс трафика, QR-коды
+- **Dashboard** — статус WDTT/Xray, IP, количество пользователей, статистика
+- **Inbound** — просмотр и редактирование настроек подключения (порты, DNS, max_users)
+- **Сервисы** — перезапуск WDTT и Xray с подтверждением
+- **Xray** — просмотр конфига, список доступных версий
 - **Алерты** — уведомления при недоступности сервисов и приближении лимита пользователей
-- **Трафик** — история, графики, отчёты по трафику
-- **QR-коды** для `wdtt://` ссылок
-- **Экспорт** — CSV и Excel
-- **Мульти-сервер** — кластерная поддержка (write на все узлы, read с первого доступного)
+- **Трафик** — история трафика с графиками, отчёты по периодам
+- **QR-коды** для `wdtt://` ссылок подключения
+- **Экспорт** — выгрузка пользователей в CSV и Excel
+- **Кластер HA** — write-операции на все узлы параллельно, чтение с первого доступного
+- **Мультисервер** — переключение между серверами и кластерами прямо из меню
 
-## Быстрый старт
+---
 
-### 1. Установка
+## Требования
 
-```bash
-git clone git@github.com:vsibilev007/wdtt-bot.git
-cd wdtt-bot
-pip install -r requirements.txt
-```
+| Компонент | Версия | Обязательно |
+|-----------|--------|-------------|
+| Python | 3.11+ | Да |
+| WDTT Panel | с HTTP API | Да |
+| matplotlib | — | Для графиков |
 
-### 2. Конфигурация
+---
+
+## Быстрый старт через Docker
+
+### 1. Создать `.env`
 
 ```bash
 cp .env.example .env
+nano .env          # заполни BOT_TOKEN, ALLOWED_USERS, SERVER_URL
 ```
 
-Отредактируйте `.env`:
-
-| Переменная | Описание | Обязательна |
-|------------|----------|-------------|
-| `BOT_TOKEN` | Токен Telegram бота | Да |
-| `ALLOWED_USERS` | Telegram ID через запятую | Да |
-| `SERVER_URL` | URL панели WDTT | Да |
-| `SERVER_USERNAME` | Логин панели | Нет (admin) |
-| `SERVER_PASSWORD` | Пароль панели | Нет (wdtt) |
-| `SERVER_NAME` | Имя сервера | Нет (WDTT) |
-| `TZ` | Временная зона | Нет |
-| `LOG_LEVEL` | Уровень логов | Нет (INFO) |
-| `TELEGRAM_PROXY_URL` | Прокси для Telegram API | Нет |
-
-### 3. Запуск
-
-```bash
-python bot.py
-```
-
-### Docker
+### 2. Запустить через Docker Compose
 
 ```bash
 docker compose up -d
 ```
 
-## Мульти-сервер
+### Локальная сборка
 
-Для кластера из нескольких серверов:
+```bash
+docker build -t wdtt-bot .
+docker run -d --env-file .env -v wdtt-data:/app/data --name wdtt-bot wdtt-bot
+```
+
+### Данные и том
+
+База данных хранится в named volume `wdtt-data` (путь внутри контейнера — `/app/data`). **Не используй bind-mount** (`./data:/app/data`) — это перетирает права `appuser` и вызывает `unable to open database file`.
+
+```bash
+# Посмотреть данные
+docker volume inspect wdtt-data
+
+# Бэкап тома
+docker run --rm -v wdtt-data:/data -v $(pwd):/backup alpine \
+  tar czf /backup/wdtt-data.tar.gz -C /data .
+```
+
+### Параметры безопасности (включены в compose)
+
+- `read_only: true` — файловая система контейнера только для чтения
+- `cap_drop: ALL` — сброс всех Linux capabilities
+- `no-new-privileges: true` — запрет эскалации привилегий
+- `mem_limit: 256m` — лимит памяти
+- Non-root пользователь `appuser` (UID 10001)
+
+---
+
+## Установка на свежей системе
+
+### 1. Установить Python и зависимости
+
+**Ubuntu / Debian:**
+
+```bash
+sudo apt update && sudo apt install -y python3 python3-venv python3-pip git
+```
+
+**CentOS / RHEL / AlmaLinux:**
+
+```bash
+sudo dnf install -y python3 python3-pip git
+```
+
+**Alpine:**
+
+```bash
+sudo apk add python3 py3-pip git
+```
+
+### 2. Клонировать репозиторий
+
+```bash
+git clone git@github.com:vsibilev007/wdtt-bot.git
+cd wdtt-bot
+```
+
+### 3. Создать виртуальное окружение и установить зависимости
+
+```bash
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 4. Настроить конфигурацию
+
+```bash
+cp .env.example .env
+nano .env
+```
+
+Заполни обязательные параметры:
+
+```env
+BOT_TOKEN=1234567890:AABBCCDDEEFFaabbccddeeff
+ALLOWED_USERS=123456789
+SERVER_URL=https://your-server:2860/wdtt
+SERVER_NAME=My WDTT
+SERVER_USERNAME=admin
+SERVER_PASSWORD=wdtt
+```
+
+> `BOT_TOKEN` — получить у [@BotFather](https://t.me/BotFather).
+> `ALLOWED_USERS` — Telegram user_id через запятую. Узнать: [@userinfobot](https://t.me/userinfobot).
+> `SERVER_URL` — адрес панели WDTT (по умолчанию `https://IP:2860/wdtt`).
+> `SERVER_USERNAME` / `SERVER_PASSWORD` — логин/пароль панели WDTT.
+
+### 5. Запустить
+
+```bash
+source venv/bin/activate
+python bot.py
+```
+
+Бот готов. Открой его в Telegram и нажми `/start`.
+
+---
+
+## Установка как systemd-сервис
+
+Создай файл `/etc/systemd/system/wdtt-bot.service`:
+
+```ini
+[Unit]
+Description=WDTT Manager Bot
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/wdtt-bot
+EnvironmentFile=/opt/wdtt-bot/.env
+ExecStart=/opt/wdtt-bot/venv/bin/python bot.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
+```
+
+> Замени `/opt/wdtt-bot` на реальный путь к проекту.
+
+```bash
+systemctl daemon-reload
+systemctl enable --now wdtt-bot
+journalctl -u wdtt-bot -f
+```
+
+---
+
+## Конфигурация (`.env`)
+
+### Обязательные
+
+| Переменная | Описание |
+|------------|----------|
+| `BOT_TOKEN` | Токен бота от @BotFather |
+| `ALLOWED_USERS` | Telegram user_id через запятую |
+
+### Серверы
+
+**Один сервер:**
+
+```env
+SERVER_URL=https://127.0.0.1:2860/wdtt
+SERVER_NAME=WDTT
+SERVER_USERNAME=admin
+SERVER_PASSWORD=wdtt
+```
+
+**Несколько серверов:**
 
 ```env
 SERVER_1_URL=https://10.0.0.1:2860/wdtt
-SERVER_1_NAME=Primary
+SERVER_1_NAME=Main
 SERVER_1_USERNAME=admin
 SERVER_1_PASSWORD=wdtt
-SERVER_1_GROUP=HA
 
 SERVER_2_URL=https://10.0.0.2:2860/wdtt
-SERVER_2_NAME=Secondary
+SERVER_2_NAME=Backup
 SERVER_2_USERNAME=admin
 SERVER_2_PASSWORD=wdtt
-SERVER_2_GROUP=HA
 ```
 
-Серверы с одинаковым `GROUP` работают как кластер:
-- Write-операции (создание/удаление пользователей) идут параллельно на все узлы
-- Read-операции идут на первый доступный узел
+**Кластер HA** — серверы с одинаковым `GROUP`:
+
+```env
+SERVER_1_URL=https://10.0.0.1:2860/wdtt
+SERVER_1_NAME=HA_A
+SERVER_1_USERNAME=admin
+SERVER_1_PASSWORD=wdtt
+SERVER_1_GROUP=cluster_ha
+
+SERVER_2_URL=https://10.0.0.2:2860/wdtt
+SERVER_2_NAME=HA_B
+SERVER_2_USERNAME=admin
+SERVER_2_PASSWORD=wdtt
+SERVER_2_GROUP=cluster_ha
+```
+
+### Прочие параметры
+
+| Переменная | Описание | По умолчанию |
+|------------|----------|--------------|
+| `TZ` | Часовой пояс | системный |
+| `LOG_LEVEL` | Уровень логов | `INFO` |
+| `LOG_FILE` | Файл логов | — (stdout) |
+| `LOG_MAX_MB` | Макс. размер файла | `10` |
+| `LOG_BACKUPS` | Кол-во бэкапов | `3` |
+| `NO_COLOR` | Отключить ANSI | — |
+| `TELEGRAM_PROXY_URL` | Прокси для Telegram API | — |
+| `WDTT_BOT_DB_PATH` | Путь к базе данных | `./wdtt_bot.db` |
+
+### Пороги алертов
+
+```env
+ALERT_WDTT_DOWN=true         # алерт при недоступности WDTT
+ALERT_XRAY_DOWN=true         # алерт при недоступности Xray
+ALERT_USERS_LIMIT_PCT=80     # порог заполненности пользователей, %
+```
+
+### Прокси для Telegram API
+
+```env
+TELEGRAM_PROXY_URL=socks5://user:password@host:port
+TELEGRAM_PROXY_URL=http://host:port
+```
+
+Поддержка SOCKS5, SOCKS4, HTTP.
+
+---
+
+## Команды
+
+| Команда | Описание |
+|---------|----------|
+| `/start` | Приветствие и главное меню |
+| `/menu` | Главное меню (Dashboard) |
+| `/find запрос` | Поиск пользователя по паролю или комментарию |
+| `/id` | Ваш Telegram ID |
+
+---
+
+## Меню бота
+
+```
+[📊 Dashboard]    [👥 Пользователи]
+[🔧 Inbound]      [🔄 Сервисы]
+[📡 Xray]         [🚨 Алерты]
+[➕ Новый клиент]  [📤 Экспорт]
+```
+
+При наличии нескольких серверов — внизу меню переключатель серверов.
+
+---
 
 ## Алерты
 
-| Тип | Описание | Cooldown |
-|-----|----------|----------|
-| `wdtt_down` | WDTT сервис недоступен | 5 мин |
+| Тип | Событие | Cooldown |
+|-----|---------|----------|
+| `wdtt_down` | WDTT сервис недоступен или панель не отвечает | 5 мин |
 | `xray_down` | Xray сервис недоступен | 5 мин |
-| `users_limit` | Приближение лимита пользователей | 5 мин |
+| `users_limit` | Количество пользователей ≥ порога от max_users | 5 мин |
 
-Настройка через меню бота: кнопка переключения для каждого типа алерта.
+Настройка через меню «🚨 Алерты» — кнопка переключения для каждого типа. История последних 20 алертов — кнопка «📋 История алертов».
 
-## Архитектура
+---
+
+## Управление пользователями
+
+### Создание (FSM-мастер)
+
+Через кнопку «➕ Новый клиент» или `user:add`:
+
+1. **Комментарий** — имя/описание (или `/skip`)
+2. **Пароль** — вручную или `/gen` для автогенерации
+3. **Срок** — дней до истечения (0 = бессрочно, `/skip` = бессрочно)
+4. **Трафик** — лимит в GB (0 = без лимита)
+5. **Устройства** — макс. количество
+6. **Max Down** — лимит скорости загрузки (Mbps)
+7. **Max Up** — лимит скорости отдачи (Mbps)
+8. **Подтверждение** — `/confirm` для создания
+
+### Редактирование
+
+Из карточки пользователя → «✏️ Редактировать» → выбор поля:
+- Комментарий, пароль, срок, трафик, устройства, скорости
+
+### Кластерные операции
+
+При создании/удалении пользователя на кластере — операция выполняется параллельно на всех узлах. Результат показывается по каждому узлу:
 
 ```
-bot.py              → Entry point (Dispatcher, Router, polling)
-config.py           → Dataclass-ы + загрузка из .env
-api_client.py       → WdtClient (cookie auth, auto-relogin)
-database.py         → aiosqlite (трафик, алерты, сессии)
-handlers.py         → Все обработчики команд и callback
-keyboards.py        → InlineKeyboardBuilder функции
-formatters.py       → HTML-форматтеры ответов API
-scheduler.py        → APScheduler (сбор трафика, health check, cleanup)
-middlewares.py       → AuthMiddleware (allowlist по user_id)
-states.py           → FSM состояния (aiogram)
-session.py          → Выбор сервера (сохраняется в БД)
-charts.py           → matplotlib графики трафика
-qr_utils.py         → QR-коды для wdtt:// ссылок
-export_utils.py     → CSV + Excel экспорт
+✅ HA_A
+✅ HA_B
 ```
+
+---
+
+## WDTT API
+
+Бот использует WDTT Panel API с cookie-сессионной авторизацией:
+
+1. `POST /login` — получает cookie `wdtt-panel`
+2. Все запросы — с этой cookie
+3. При 401 — автоматический re-login
+
+### Используемые эндпоинты
+
+| Метод | Путь | Описание |
+|-------|------|----------|
+| POST | `/login` | Авторизация |
+| GET | `/panel/api/status` | Статус сервисов |
+| GET | `/panel/api/inbound` | Настройки inbound |
+| POST | `/panel/api/inbound/save` | Сохранить inbound |
+| GET | `/panel/api/users` | Список пользователей |
+| POST | `/panel/api/users/add` | Создать пользователя |
+| POST | `/panel/api/users/update` | Обновить пользователя |
+| POST | `/panel/api/users/delete` | Удалить пользователя |
+| POST | `/panel/api/users/reset-traffic` | Сбросить трафик |
+| POST | `/panel/api/server/restartWdttService` | Перезапуск WDTT |
+| POST | `/panel/api/server/restartXrayService` | Перезапуск Xray |
+| POST | `/panel/api/password/main` | Сменить главный пароль |
+| GET | `/panel/api/xray/config` | Xray конфиг |
+| POST | `/panel/api/xray/config` | Сохранить Xray конфиг |
+| GET | `/panel/api/xray/versions` | Версии Xray |
+| POST | `/panel/api/xray/install/{tag}` | Установить версию Xray |
+
+---
+
+## Ссылки `wdtt://`
+
+Формат подключения:
+
+```
+wdtt:// + base64(JSON)
+```
+
+JSON:
+
+```json
+{
+  "v": "1",
+  "ps": "WDTT",
+  "tag": "wdtt-in",
+  "add": "YOUR_SERVER_IP",
+  "dtls": 56000,
+  "wg": 56001,
+  "lp": 9000,
+  "id": "password"
+}
+```
+
+Бот показывает ссылку в карточке пользователя и генерирует QR-код.
+
+---
+
+## Структура проекта
+
+```
+wdtt-bot/
+├── bot.py              # Точка входа (Dispatcher, Router, polling)
+├── config.py           # Конфигурация из .env
+├── api_client.py       # WdtClient + кластерные операции
+├── database.py         # SQLite: трафик, алерты, сессии
+├── handlers.py         # Обработчики команд и callback
+├── keyboards.py        # Inline-клавиатуры
+├── formatters.py       # HTML-форматирование ответов API
+├── scheduler.py        # Фоновые задачи: трафик, health, cleanup, heartbeat
+├── middlewares.py       # AuthMiddleware (allowlist по user_id)
+├── states.py           # FSM состояния (aiogram)
+├── session.py          # Выбор сервера (сохраняется в БД)
+├── charts.py           # Графики трафика (matplotlib)
+├── qr_utils.py         # Генерация QR-кодов для wdtt:// ссылок
+├── export_utils.py     # Экспорт CSV/Excel
+├── logging_setup.py    # Цветной вывод, ротация файла логов
+├── tz.py               # Часовые пояса
+├── requirements.txt    # Зависимости
+├── Dockerfile          # Multi-stage Docker образ
+├── docker-compose.yml  # Docker Compose конфиг
+├── .env.example        # Шаблон конфигурации
+└── .gitignore
+```
+
+---
 
 ## Зависимости
 
-- aiogram 3.27 — Telegram бот фреймворк
-- aiohttp — async HTTP клиент
-- aiosqlite — async SQLite
-- APScheduler — фоновые задачи
-- matplotlib — графики
-- openpyxl — Excel экспорт
-- qrcode — QR-коды
+```
+aiogram==3.27.0          # Telegram бот фреймворк
+aiohttp==3.13.5          # Async HTTP клиент
+aiosqlite==0.22.1        # Async SQLite
+APScheduler==3.11.2       # Фоновые задачи
+openpyxl==3.1.5           # Excel экспорт
+matplotlib==3.10.3        # Графики
+qrcode[pil]==8.2          # QR-коды
+Pillow==12.3.0            # Обработка изображений
+python-dotenv==1.2.2      # Загрузка .env
+```
 
-## Правила
-
-- **Никогда не пушить в git без явного одобрения.** Сначала тест на сервере, потом push.
-- Авторизация через cookie (`POST /login` → `wdtt-panel` cookie)
-- Пользователи идентифицируются по `password` (уникальный в WDTT)
+---
 
 ## Лицензия
 
