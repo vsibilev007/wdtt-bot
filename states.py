@@ -9,6 +9,7 @@ class AddUserFSM(StatesGroup):
     max_devices = State()
     max_down_mbps = State()
     max_up_mbps = State()
+    vk_hash = State()
     confirm = State()
 
 

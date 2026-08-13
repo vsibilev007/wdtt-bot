@@ -101,6 +101,12 @@ class WdtClient:
             cookie_str = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
             headers["Cookie"] = cookie_str
 
+        # CSRF token для POST/PUT/DELETE запросов
+        if method.upper() in ("POST", "PUT", "DELETE", "PATCH"):
+            csrf = self._cookies.get("wdtt-csrf", "")
+            if csrf:
+                headers["X-CSRF-Token"] = csrf
+
         sem = _get_semaphore(self.base_url)
         async with sem:
             try:

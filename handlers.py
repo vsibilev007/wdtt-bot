@@ -612,6 +612,17 @@ async def adduser_max_up(message: Message, state: FSMContext):
         await message.answer("Введите число:")
         return
     await state.update_data(max_up_mbps=mbps)
+    await message.answer("VK Hash (или /skip):")
+    await state.set_state(AddUserFSM.vk_hash)
+
+
+@router.message(AddUserFSM.vk_hash)
+async def adduser_vk_hash(message: Message, state: FSMContext):
+    if _is_command(message):
+        await state.clear()
+        return
+    vk_hash = message.text.strip() if message.text != "/skip" else ""
+    await state.update_data(vk_hash=vk_hash)
 
     data = await state.get_data()
     expires_at = 0
@@ -631,7 +642,8 @@ async def adduser_max_up(message: Message, state: FSMContext):
         f"Трафик: {traffic_str}\n"
         f"Устройства: {data.get('max_devices', 1)}\n"
         f"Max Down: {data.get('max_down_mbps', 0) or 'без лимита'} Mbps\n"
-        f"Max Up: {data.get('max_up_mbps', 0) or 'без лимита'} Mbps\n\n"
+        f"Max Up: {data.get('max_up_mbps', 0) or 'без лимита'} Mbps\n"
+        f"VK Hash: {data.get('vk_hash', '—') or '—'}\n\n"
         f"Отправьте /confirm для создания или /cancel для отмены:"
     )
     await state.update_data(expires_at=expires_at)
@@ -664,6 +676,8 @@ async def adduser_confirm(message: Message, state: FSMContext, config: Config):
         payload["max_down_mbps"] = data["max_down_mbps"]
     if data.get("max_up_mbps"):
         payload["max_up_mbps"] = data["max_up_mbps"]
+    if data.get("vk_hash"):
+        payload["vk_hash"] = data["vk_hash"]
 
     client, srv = await get_client(message.from_user.id, config)
 
