@@ -32,13 +32,13 @@ def format_status(obj: dict, server_name: str = "") -> str:
     """Форматирует GET /panel/api/status."""
     lines = [f"<b>📊 Панель WDTT</b>"]
     if server_name:
-        lines.append(f"Сервер: <code>{server_name}</code>")
+        lines.append(f"Сервер: {server_name}")
     lines.append("")
 
-    lines.append(f"IP: <code>{obj.get('server_ip', '—')}</code>")
+    lines.append(f"IP: {obj.get('server_ip', '—')}")
     lines.append(f"WDTT: {fmt_bool(obj.get('wdtt_active', False))}")
     lines.append(f"Xray: {fmt_bool(obj.get('xray_active', False))}")
-    lines.append(f"Интерфейс: <code>{obj.get('wdtt_iface', '—')}</code>")
+    lines.append(f"Интерфейс: {obj.get('wdtt_iface', '—')}")
     lines.append(f"Пользователей: <b>{obj.get('users_count', 0)}</b>")
 
     main_pwd = obj.get("main_password", "")
@@ -50,6 +50,10 @@ def format_status(obj: dict, server_name: str = "") -> str:
         lines.append("")
         lines.append("<b>Статистика:</b>")
         for key, val in stats.items():
+            # Пропускаем массив online — он слишком длинный
+            if key == "online" and isinstance(val, list):
+                lines.append(f"  Онлайн сессий: {len(val)}")
+                continue
             lines.append(f"  {key}: {val}")
 
     return "\n".join(lines)
@@ -82,8 +86,12 @@ def format_users_list(users: list, page: int = 0, per_page: int = 10) -> str:
         if traffic:
             details.append(f"📦 {traffic}")
         details.append(f"⏰ {expires}")
-        devices = f"{u.get('devices_bound', 0)}/{u.get('max_devices', 1)}"
-        details.append(f"📱 {devices}")
+        max_dev = u.get('max_devices', 1)
+        bound = u.get('devices_bound', 0)
+        if max_dev == 0:
+            details.append(f"📱 {bound}/∞")
+        else:
+            details.append(f"📱 {bound}/{max_dev}")
         lines.append("  " + " | ".join(details))
 
     lines.append(f"\nСтраница {page + 1}/{max(1, (total + per_page - 1) // per_page)}")
@@ -183,22 +191,22 @@ def format_user_link(user: dict, inbound: dict = None) -> str:
     # iOS — VK Turn Proxy (1 hash, local=0)
     ios_link = _colon(0, hash_limit=1)
     lines.append(f"<b>iOS — VK Turn Proxy</b>")
-    lines.append(f"<code>{ios_link}</code>\n")
+    lines.append(f"{ios_link}\n")
 
     # Android — WDTT (up to 4 hashes, local=client_port)
     android_link = _colon(client_port)
     lines.append(f"<b>Android — WDTT</b>")
-    lines.append(f"<code>{android_link}</code>\n")
+    lines.append(f"{android_link}\n")
 
     # PWDTT — Desktop Win/Linux (up to 4 hashes, with name)
     desktop_link = _colon(0, with_name=True)
     lines.append(f"<b>PWDTT — Desktop</b>")
-    lines.append(f"<code>{desktop_link}</code>\n")
+    lines.append(f"{desktop_link}\n")
 
     # WDTT — Windows (up to 4 hashes, with name)
     win_link = _colon(0, with_name=True)
     lines.append(f"<b>WDTT — Windows</b>")
-    lines.append(f"<code>{win_link}</code>")
+    lines.append(f"{win_link}")
 
     return "\n".join(lines)
 

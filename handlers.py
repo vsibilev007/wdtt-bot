@@ -366,9 +366,7 @@ async def cb_user_link(cq: CallbackQuery, config: Config):
 
     text = format_user_link(user, inbound)
     kb = InlineKeyboardBuilder()
-    kb.button(text="📷 QR", callback_data=f"user:qr:{password}")
     kb.button(text="◀️ Назад", callback_data=f"user:view:{password}")
-    kb.adjust(2)
     await _safe_edit(cq, text, kb.as_markup())
 
 

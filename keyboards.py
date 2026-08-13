@@ -112,7 +112,6 @@ def user_detail_kb(password: str, active: bool = True) -> InlineKeyboardMarkup:
     kb.button(text="✏️ Редактировать", callback_data=f"user:edit:{password}")
 
     kb.button(text="🔗 Ссылка", callback_data=f"user:link:{password}")
-    kb.button(text="📷 QR", callback_data=f"user:qr:{password}")
 
     kb.button(text="📊 Трафик", callback_data=f"user:traffic:{password}")
     kb.button(text="🔄 Сброс трафика", callback_data=f"user:reset_traffic:{password}")
@@ -120,7 +119,7 @@ def user_detail_kb(password: str, active: bool = True) -> InlineKeyboardMarkup:
     kb.button(text="🗑 Удалить", callback_data=f"user:delete:{password}")
     kb.button(text="◀️ Назад", callback_data="menu:users")
 
-    kb.adjust(2, 2, 2, 2)
+    kb.adjust(2, 1, 2, 2)
     return kb.as_markup()
 
 
