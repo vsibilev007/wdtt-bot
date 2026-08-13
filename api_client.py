@@ -10,14 +10,10 @@ from __future__ import annotations
 import asyncio
 import json as json_lib
 import logging
-import warnings
 from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
-
-# Подавляем предупреждение о непроверенном SSL (WDTT использует самоподписанный сертификат)
-warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
 logger = logging.getLogger(__name__)
 
@@ -61,8 +57,8 @@ class WdtClient:
                         url,
                         data={"username": self.username, "password": self.password},
                         allow_redirects=False,
-                        ssl=False,
                     ) as resp:
+                        logger.debug("WDTT login %s → %d, cookies: %s", url, resp.status, dict(resp.cookies))
                         if resp.status in (200, 302):
                             cookies = {}
                             for cookie in resp.cookies.values():
@@ -74,7 +70,8 @@ class WdtClient:
                             # Cookie может быть в Set-Cookie заголовке
                             logger.warning("WDTT login: нет cookie в ответе")
                             return resp.status == 200
-                        logger.warning("WDTT login failed: status=%d", resp.status)
+                        text = await resp.text()
+                        logger.warning("WDTT login failed: status=%d, body=%s", resp.status, text[:200])
                         return False
             except Exception as e:
                 logger.error("WDTT login error: %s", e)
@@ -97,7 +94,7 @@ class WdtClient:
                     timeout=TIMEOUT,
                     cookies=self._cookies,
                 ) as session:
-                    async with session.request(method, url, json=json, ssl=False) as resp:
+                    async with session.request(method, url, json=json) as resp:
                         # Если 401 — пробуем перелогиниться
                         if resp.status == 401 and auto_login:
                             logger.debug("WDTT 401, re-login: %s", url)
@@ -108,6 +105,8 @@ class WdtClient:
                             raise ApiError("auth_failed", "Не удалось авторизоваться в WDTT")
 
                         text = await resp.text()
+                        logger.debug("WDTT %s %s → %d, body=%d bytes", method, path, resp.status, len(text))
+
                         if not text.strip():
                             # Пустой ответ — некоторые POST-эндпоинты возвращают 200 без тела
                             if resp.status >= 400:
@@ -118,6 +117,7 @@ class WdtClient:
                             data = json_lib.loads(text)
                         except Exception:
                             # Ответ не JSON
+                            logger.warning("WDTT не-JSON ответ: %s %s → %d, body=%s", method, path, resp.status, text[:200])
                             if resp.status >= 400:
                                 raise ApiError("http_error", f"HTTP {resp.status}: {text[:200]}", status=resp.status)
                             raise ApiError("parse_error", f"Ответ не JSON: {text[:200]}", status=resp.status)
