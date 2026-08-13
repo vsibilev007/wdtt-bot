@@ -612,7 +612,10 @@ async def adduser_max_up(message: Message, state: FSMContext):
         await message.answer("Введите число:")
         return
     await state.update_data(max_up_mbps=mbps)
-    await message.answer("VK Hash (или /skip):")
+    await message.answer(
+        "VK Hash (обязательно):\n"
+        "Один или несколько хешей (до 4) через запятую или с новой строки."
+    )
     await state.set_state(AddUserFSM.vk_hash)
 
 
@@ -621,7 +624,14 @@ async def adduser_vk_hash(message: Message, state: FSMContext):
     if _is_command(message):
         await state.clear()
         return
-    vk_hash = message.text.strip() if message.text != "/skip" else ""
+    vk_hash = message.text.strip()
+    if not vk_hash:
+        await message.answer("VK Hash обязателен. Введите хеш:")
+        return
+    # Нормализуем: запятые и переносы строк → запятые
+    vk_hash = ",".join(
+        h.strip() for h in vk_hash.replace("\n", ",").split(",") if h.strip()
+    )
     await state.update_data(vk_hash=vk_hash)
 
     data = await state.get_data()
