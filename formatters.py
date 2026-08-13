@@ -89,40 +89,14 @@ def format_online_sessions(obj: dict) -> str:
 # ─── Users ────────────────────────────────────────────────────────────────────
 
 def format_users_list(users: list, page: int = 0, per_page: int = 10) -> str:
-    """Форматирует список пользователей с пагинацией."""
+    """Форматирует заголовок списка пользователей."""
     if not users:
         return "<b>👥 Пользователи</b>\n\nНет пользователей."
 
     total = len(users)
-    start = page * per_page
-    end = min(start + per_page, total)
-    page_users = users[start:end]
+    online = sum(1 for u in users if u.get("online"))
 
-    lines = [f"<b>👥 Пользователи</b> ({total})\n"]
-
-    for u in page_users:
-        status = "🟢" if u.get("online") else ("⚪" if u.get("active") else "🔴")
-        comment = u.get("comment", "")
-        pwd = u.get("password", "")
-        label = comment if comment else pwd[:12]
-        traffic = u.get("traffic_used_fmt", "")
-        expires = u.get("expires", "бессрочно")
-
-        lines.append(f"{status} <b>{label}</b>")
-        details = []
-        if traffic:
-            details.append(f"📦 {traffic}")
-        details.append(f"⏰ {expires}")
-        max_dev = u.get('max_devices', 1)
-        bound = u.get('devices_bound', 0)
-        if max_dev == 0:
-            details.append(f"📱 {bound}/∞")
-        else:
-            details.append(f"📱 {bound}/{max_dev}")
-        lines.append("  " + " | ".join(details))
-
-    lines.append(f"\nСтраница {page + 1}/{max(1, (total + per_page - 1) // per_page)}")
-    return "\n".join(lines)
+    return f"<b>👥 Клиенты: {online} / {total}</b>\n"
 
 
 def format_user_detail(user: dict, inbound: dict = None) -> str:
