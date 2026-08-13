@@ -45,6 +45,27 @@ nano .env          # заполни BOT_TOKEN, ALLOWED_USERS, SERVER_URL
 docker compose up -d
 ```
 
+### Образ из GHCR
+
+Образ автоматически публикуется в GitHub Container Registry при пуше в `main` или создании тега `v*`.
+
+```bash
+# Последняя версия с main
+docker pull ghcr.io/vsibilev007/wdtt-bot:main
+
+# Конкретная версия
+docker pull ghcr.io/vsibilev007/wdtt-bot:1.0.0
+```
+
+Используй в `docker-compose.yml`:
+
+```yaml
+services:
+  wdtt-bot:
+    image: ghcr.io/vsibilev007/wdtt-bot:main
+    # убери строку build: .
+```
+
 ### Локальная сборка
 
 ```bash
@@ -409,7 +430,11 @@ wdtt-bot/
 ├── Dockerfile          # Multi-stage Docker образ
 ├── docker-compose.yml  # Docker Compose конфиг
 ├── .env.example        # Шаблон конфигурации
-└── .gitignore
+├── .gitignore
+├── .dockerignore
+└── .github/
+    └── workflows/
+        └── docker.yml  # CI/CD: сборка и публикация в GHCR
 ```
 
 ---
