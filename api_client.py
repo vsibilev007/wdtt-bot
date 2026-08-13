@@ -87,17 +87,20 @@ class WdtClient:
         """HTTP request с auto-re-login на 401."""
         url = f"{self.base_url}{path}"
 
+        # Cookie передаём через заголовок — надёжнее чем через параметр cookies
+        headers = {}
+        if self._cookies:
+            cookie_str = "; ".join(f"{k}={v}" for k, v in self._cookies.items())
+            headers["Cookie"] = cookie_str
+
         sem = _get_semaphore(self.base_url)
         async with sem:
             try:
-                async with aiohttp.ClientSession(
-                    timeout=TIMEOUT,
-                    cookies=self._cookies,
-                ) as session:
-                    async with session.request(method, url, json=json) as resp:
+                async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+                    async with session.request(method, url, json=json, headers=headers) as resp:
                         # Если 401 — пробуем перелогиниться
                         if resp.status == 401 and auto_login:
-                            logger.debug("WDTT 401, re-login: %s", url)
+                            logger.debug("WDTT 401, re-login: %s (cookie=%s)", url, bool(self._cookies))
                             if await self.login():
                                 return await self._request(
                                     method, path, json=json, auto_login=False,
@@ -105,13 +108,23 @@ class WdtClient:
                             raise ApiError("auth_failed", "Не удалось авторизоваться в WDTT")
 
                         text = await resp.text()
-                        logger.debug("WDTT %s %s → %d, body=%d bytes", method, path, resp.status, len(text))
+                        logger.debug("WDTT %s %s → %d, body=%d bytes, cookie=%s", method, path, resp.status, len(text), bool(self._cookies))
 
                         if not text.strip():
                             # Пустой ответ — некоторые POST-эндпоинты возвращают 200 без тела
                             if resp.status >= 400:
                                 raise ApiError("http_error", f"HTTP {resp.status}", status=resp.status)
                             return {}
+
+                        # Если ответ — HTML (а не JSON), значит cookie протухла или не отправилась
+                        stripped = text.lstrip()
+                        if stripped.startswith("<") and auto_login:
+                            logger.debug("WDTT получил HTML вместо JSON, пробуем re-login: %s", url)
+                            if await self.login():
+                                return await self._request(
+                                    method, path, json=json, auto_login=False,
+                                )
+                            raise ApiError("auth_failed", "Панель вернула HTML — авторизация не удалась")
 
                         try:
                             data = json_lib.loads(text)
