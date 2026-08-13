@@ -1,0 +1,22 @@
+services:
+  wdtt-bot:
+    build: .
+    container_name: wdtt-bot
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - wdtt-data:/app/data
+    tmpfs:
+      - /tmp:size=10M
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 256M
+
+volumes:
+  wdtt-data:

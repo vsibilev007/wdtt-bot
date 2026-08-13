@@ -1,0 +1,261 @@
+"""
+Форматтеры ответов API в читаемый текст для Telegram
+"""
+
+from __future__ import annotations
+
+import math
+from typing import Optional
+
+import tz as _tz
+
+
+def fmt_bytes(b: Optional[int]) -> str:
+    if b is None:
+        return "—"
+    if b == 0:
+        return "0 B"
+    units = ["B", "KB", "MB", "GB", "TB"]
+    i = int(math.floor(math.log(b, 1024)))
+    i = min(i, len(units) - 1)
+    p = math.pow(1024, i)
+    return f"{b / p:.1f} {units[i]}"
+
+
+def fmt_bool(v: bool) -> str:
+    return "✅" if v else "❌"
+
+
+# ─── Dashboard / Status ──────────────────────────────────────────────────────
+
+def format_status(obj: dict, server_name: str = "") -> str:
+    """Форматирует GET /panel/api/status."""
+    lines = [f"<b>📊 Панель WDTT</b>"]
+    if server_name:
+        lines.append(f"Сервер: <code>{server_name}</code>")
+    lines.append("")
+
+    lines.append(f"IP: <code>{obj.get('server_ip', '—')}</code>")
+    lines.append(f"WDTT: {fmt_bool(obj.get('wdtt_active', False))}")
+    lines.append(f"Xray: {fmt_bool(obj.get('xray_active', False))}")
+    lines.append(f"Интерфейс: <code>{obj.get('wdtt_iface', '—')}</code>")
+    lines.append(f"Пользователей: <b>{obj.get('users_count', 0)}</b>")
+
+    main_pwd = obj.get("main_password", "")
+    if main_pwd:
+        lines.append(f"Главный пароль: <code>{main_pwd}</code>")
+
+    stats = obj.get("stats", {})
+    if stats:
+        lines.append("")
+        lines.append("<b>Статистика:</b>")
+        for key, val in stats.items():
+            lines.append(f"  {key}: {val}")
+
+    return "\n".join(lines)
+
+
+# ─── Users ────────────────────────────────────────────────────────────────────
+
+def format_users_list(users: list, page: int = 0, per_page: int = 10) -> str:
+    """Форматирует список пользователей с пагинацией."""
+    if not users:
+        return "<b>👥 Пользователи</b>\n\nНет пользователей."
+
+    total = len(users)
+    start = page * per_page
+    end = min(start + per_page, total)
+    page_users = users[start:end]
+
+    lines = [f"<b>👥 Пользователи</b> ({total})\n"]
+
+    for u in page_users:
+        status = "🟢" if u.get("online") else ("⚪" if u.get("active") else "🔴")
+        comment = u.get("comment", "")
+        pwd = u.get("password", "")
+        label = comment if comment else pwd[:12]
+        traffic = u.get("traffic_used_fmt", "")
+        expires = u.get("expires", "бессрочно")
+
+        lines.append(f"{status} <b>{label}</b>")
+        details = []
+        if traffic:
+            details.append(f"📦 {traffic}")
+        details.append(f"⏰ {expires}")
+        devices = f"{u.get('devices_bound', 0)}/{u.get('max_devices', 1)}"
+        details.append(f"📱 {devices}")
+        lines.append("  " + " | ".join(details))
+
+    lines.append(f"\nСтраница {page + 1}/{max(1, (total + per_page - 1) // per_page)}")
+    return "\n".join(lines)
+
+
+def format_user_detail(user: dict, inbound: dict = None) -> str:
+    """Форматирует детальную информацию о пользователе."""
+    comment = user.get("comment", "")
+    pwd = user.get("password", "")
+    label = comment if comment else pwd[:16]
+
+    lines = [f"<b>👤 {label}</b>\n"]
+
+    lines.append(f"Пароль: <code>{pwd}</code>")
+    lines.append(f"Активен: {fmt_bool(user.get('active', True))}")
+    lines.append(f"Онлайн: {fmt_bool(user.get('online', False))}")
+
+    expires = user.get("expires", "бессрочно")
+    lines.append(f"Истекает: {expires}")
+
+    total_gb = user.get("total_gb", 0)
+    if total_gb:
+        lines.append(f"Лимит трафика: {total_gb} GB")
+    else:
+        lines.append("Лимит трафика: без лимита")
+
+    traffic = user.get("traffic_used_fmt", "")
+    if traffic:
+        lines.append(f"Использовано: {traffic}")
+
+    devices_bound = user.get("devices_bound", 0)
+    max_devices = user.get("max_devices", 1)
+    lines.append(f"Устройства: {devices_bound}/{max_devices}")
+
+    device_ids = user.get("device_ids", [])
+    if device_ids:
+        lines.append(f"Device IDs: {', '.join(device_ids[:3])}")
+
+    link = user.get("link", "")
+    if link:
+        lines.append(f"\n<b>Ссылка:</b>")
+        lines.append(f"<code>{link}</code>")
+
+    return "\n".join(lines)
+
+
+def format_user_link(user: dict) -> str:
+    """Форматирует только ссылку пользователя."""
+    link = user.get("link", "")
+    comment = user.get("comment", "")
+    pwd = user.get("password", "")
+    label = comment if comment else pwd[:12]
+
+    lines = [f"<b>🔗 Ссылка — {label}</b>\n"]
+    if link:
+        lines.append(f"<code>{link}</code>")
+    else:
+        lines.append("Ссылка недоступна.")
+    return "\n".join(lines)
+
+
+# ─── Inbound ──────────────────────────────────────────────────────────────────
+
+def format_inbound(obj: dict) -> str:
+    """Форматирует GET /panel/api/inbound."""
+    lines = ["<b>🔧 Настройки подключения (Inbound)</b>\n"]
+
+    lines.append(f"Tag: <code>{obj.get('tag', '—')}</code>")
+    lines.append(f"Remark: {obj.get('remark', '—')}")
+    lines.append(f"Listen: <code>{obj.get('listen_host', '—')}</code>")
+    lines.append(f"DTLS порт: <code>{obj.get('dtls_port', '—')}</code>")
+    lines.append(f"WG порт: <code>{obj.get('wg_port', '—')}</code>")
+    lines.append(f"Клиентский порт: <code>{obj.get('client_port', '—')}</code>")
+    lines.append(f"DNS: <code>{obj.get('dns', '—')}</code>")
+    lines.append(f"Макс. пользователей: <b>{obj.get('max_users', '—')}</b>")
+
+    lines.append("")
+    lines.append(f"WDTT сервис: {fmt_bool(obj.get('service_active', False))}")
+    lines.append(f"Интерфейс: {fmt_bool(obj.get('iface_up', False))}")
+    lines.append(f"DTLS: {fmt_bool(obj.get('dtls_listening', False))}")
+    lines.append(f"WireGuard: {fmt_bool(obj.get('wg_listening', False))}")
+    lines.append(f"Активных: {obj.get('active_users', 0)}")
+    lines.append(f"Онлайн: {obj.get('online_users', 0)}")
+    lines.append(f"Xray: {fmt_bool(obj.get('xray_active', False))}")
+
+    return "\n".join(lines)
+
+
+# ─── Services ─────────────────────────────────────────────────────────────────
+
+def format_services(status: dict) -> str:
+    """Форматирует статус сервисов."""
+    lines = ["<b>🔄 Сервисы</b>\n"]
+
+    lines.append(f"WDTT: {fmt_bool(status.get('wdtt_active', False))}")
+    lines.append(f"Xray: {fmt_bool(status.get('xray_active', False))}")
+
+    iface = status.get("wdtt_iface", "")
+    if iface:
+        lines.append(f"Интерфейс: <code>{iface}</code>")
+
+    ip = status.get("server_ip", "")
+    if ip:
+        lines.append(f"IP: <code>{ip}</code>")
+
+    return "\n".join(lines)
+
+
+# ─── Xray ─────────────────────────────────────────────────────────────────────
+
+def format_xray_config(config: dict) -> str:
+    """Форматирует Xray конфиг."""
+    import json
+    lines = ["<b>📡 Xray конфиг</b>\n"]
+    try:
+        pretty = json.dumps(config, indent=2, ensure_ascii=False)
+        # Обрезаем если слишком длинный
+        if len(pretty) > 3000:
+            pretty = pretty[:3000] + "\n..."
+        lines.append(f"<pre>{pretty}</pre>")
+    except Exception:
+        lines.append(f"<pre>{config}</pre>")
+    return "\n".join(lines)
+
+
+def format_xray_versions(versions: dict) -> str:
+    """Форматирует список версий Xray."""
+    lines = ["<b>📡 Версии Xray</b>\n"]
+    # Структура ответа зависит от WDTT
+    if isinstance(versions, list):
+        for v in versions[:20]:
+            lines.append(f"  • {v}")
+    elif isinstance(versions, dict):
+        for k, v in versions.items():
+            lines.append(f"  {k}: {v}")
+    return "\n".join(lines)
+
+
+# ─── Alerts ───────────────────────────────────────────────────────────────────
+
+ALERT_TYPES = {
+    "wdtt_down": "WDTT сервис недоступен",
+    "xray_down": "Xray сервис недоступен",
+    "users_limit": "Лимит пользователей",
+}
+
+
+def format_alerts(alert_states: dict[str, bool]) -> str:
+    """Форматирует настройки алертов."""
+    lines = ["<b>🚨 Настройки алертов</b>\n"]
+    for atype, desc in ALERT_TYPES.items():
+        state = alert_states.get(atype, False)
+        icon = "🔔" if state else "🔕"
+        lines.append(f"{icon} {desc}")
+    return "\n".join(lines)
+
+
+# ─── Alert log ────────────────────────────────────────────────────────────────
+
+def format_alert_log(alerts: list) -> str:
+    """Форматирует историю алертов."""
+    lines = ["<b>📋 История алертов</b>\n"]
+    if not alerts:
+        lines.append("Нет сработавших алертов.")
+        return "\n".join(lines)
+    for a in alerts:
+        atype = a.get("alert_type", "")
+        msg = a.get("message", "")
+        fired = a.get("fired_at", 0)
+        dt_str = _tz.fmt_datetime(fired) if fired else "—"
+        lines.append(f"• <b>{atype}</b> — {dt_str}")
+        if msg:
+            lines.append(f"  {msg[:100]}")
+    return "\n".join(lines)

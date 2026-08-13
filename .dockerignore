@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.db
+.env
+*.egg-info/
+dist/
+build/
+.git/
+.gitignore
+Dockerfile
+docker-compose.yml
+README.md
