@@ -8,11 +8,16 @@
 from __future__ import annotations
 
 import asyncio
+import json as json_lib
 import logging
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
+
+# Подавляем предупреждение о непроверенном SSL (WDTT использует самоподписанный сертификат)
+warnings.filterwarnings("ignore", message="Unverified HTTPS request")
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +61,7 @@ class WdtClient:
                         url,
                         data={"username": self.username, "password": self.password},
                         allow_redirects=False,
+                        ssl=False,
                     ) as resp:
                         if resp.status in (200, 302):
                             cookies = {}
@@ -91,7 +97,7 @@ class WdtClient:
                     timeout=TIMEOUT,
                     cookies=self._cookies,
                 ) as session:
-                    async with session.request(method, url, json=json) as resp:
+                    async with session.request(method, url, json=json, ssl=False) as resp:
                         # Если 401 — пробуем перелогиниться
                         if resp.status == 401 and auto_login:
                             logger.debug("WDTT 401, re-login: %s", url)
@@ -101,7 +107,21 @@ class WdtClient:
                                 )
                             raise ApiError("auth_failed", "Не удалось авторизоваться в WDTT")
 
-                        data = await resp.json(content_type=None)
+                        text = await resp.text()
+                        if not text.strip():
+                            # Пустой ответ — некоторые POST-эндпоинты возвращают 200 без тела
+                            if resp.status >= 400:
+                                raise ApiError("http_error", f"HTTP {resp.status}", status=resp.status)
+                            return {}
+
+                        try:
+                            data = json_lib.loads(text)
+                        except Exception:
+                            # Ответ не JSON
+                            if resp.status >= 400:
+                                raise ApiError("http_error", f"HTTP {resp.status}: {text[:200]}", status=resp.status)
+                            raise ApiError("parse_error", f"Ответ не JSON: {text[:200]}", status=resp.status)
+
                         if not data.get("success"):
                             raise ApiError(
                                 code="api_error",
