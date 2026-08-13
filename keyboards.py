@@ -75,7 +75,7 @@ def users_list_kb(
 
     for u in page_users:
         comment = u.get("comment", "")
-        pwd = u.get("password", "")
+        pwd = u.get("password_key", "") or u.get("password", "")
         online = "🟢" if u.get("online") else ("⚪" if u.get("active") else "🔴")
         label = f"{online} {comment}" if comment else f"{online} {pwd[:12]}"
         kb.button(text=label[:40], callback_data=f"user:view:{pwd}")

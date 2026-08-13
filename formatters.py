@@ -93,7 +93,8 @@ def format_users_list(users: list, page: int = 0, per_page: int = 10) -> str:
 def format_user_detail(user: dict, inbound: dict = None) -> str:
     """Форматирует детальную информацию о пользователе."""
     comment = user.get("comment", "")
-    pwd = user.get("password", "")
+    # password_key — полный пароль, password — маскированный
+    pwd = user.get("password_key", "") or user.get("password", "")
     label = comment if comment else pwd[:16]
 
     lines = [f"<b>👤 {label}</b>\n"]
@@ -132,9 +133,10 @@ def format_user_detail(user: dict, inbound: dict = None) -> str:
 
 
 def format_user_link(user: dict, inbound: dict = None) -> str:
-    """Форматирует ссылки пользователя по типам клиентов."""
+    """Форматирует ссылки пользователя по типам клиентов (colon-формат)."""
     comment = user.get("comment", "")
-    pwd = user.get("password", "")
+    # password_key — полный пароль, password — маскированный
+    pwd = user.get("password_key", "") or user.get("password", "")
     label = comment if comment else pwd[:12]
 
     # Данные из inbound
@@ -143,12 +145,13 @@ def format_user_link(user: dict, inbound: dict = None) -> str:
     wg_port = 56001
     client_port = 9000
     if inbound:
-        host = inbound.get("server_host", "") or ""
+        # default_link_host — основной хост для ссылок
+        host = inbound.get("default_link_host", "") or inbound.get("server_host", "") or ""
         dtls_port = inbound.get("dtls_port", 56000)
         wg_port = inbound.get("wg_port", 56001)
         client_port = inbound.get("client_port", 9000)
 
-    # Если host не задан — берём из ссылки (add поле)
+    # Фолбэк: декодируем wdtt:// ссылку для получения хоста
     link = user.get("link", "")
     if not host and link:
         try:
@@ -156,19 +159,19 @@ def format_user_link(user: dict, inbound: dict = None) -> str:
             if link.startswith("wdtt://"):
                 payload = link[7:]
                 decoded = _json.loads(base64.b64decode(payload))
-                host = decoded.get("add", "")
+                host = decoded.get("ip", "") or decoded.get("add", "")
         except Exception:
             pass
 
     if not host:
         host = "?"
 
-    # VK hash — пока пустой, т.к. API не возвращает его
-    vk_hash = ""
+    # VK hash из user
+    vk_hash = user.get("vk_hash", "")
 
     lines = [f"<b>🔗 Ссылки — {label}</b>\n"]
 
-    # Формируем colon-ссылки для разных клиентов
+    # Формируем colon-ссылки: wdtt://host:dtls:wg:local:pass:hash[#name]
     def _colon(local_port: int, hash_limit: int = 0, with_name: bool = False) -> str:
         h = vk_hash
         if hash_limit and h:
