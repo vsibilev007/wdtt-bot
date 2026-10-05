@@ -26,8 +26,12 @@ import scheduler as sched
 setup_logging()
 logger = logging.getLogger(__name__)
 
+_menu_task: asyncio.Task | None = None
 
-async def setup_bot_menu(bot: Bot):
+
+async def _install_bot_menu(bot: Bot):
+    """Ставит меню команд в фоне с ретраями: недоступность api.telegram.org
+    при старте не должна ронять бот — polling сам дождётся сети."""
     commands = [
         BotCommand(command="menu",    description="Главное меню"),
         BotCommand(command="find",    description="Поиск пользователя"),
@@ -35,9 +39,22 @@ async def setup_bot_menu(bot: Bot):
         BotCommand(command="id",      description="Ваш Telegram ID"),
         BotCommand(command="help",    description="Справка по командам"),
     ]
-    await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
-    await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
-    logger.info("Меню бота установлено (%d команд)", len(commands))
+    delay = 5
+    while True:
+        try:
+            await bot.set_my_commands(commands, scope=BotCommandScopeDefault())
+            await bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+            logger.info("Меню бота установлено (%d команд)", len(commands))
+            return
+        except Exception as e:
+            logger.warning("Меню команд не установлено (%s: %s) — повтор через %dс", type(e).__name__, e, delay)
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 300)
+
+
+async def setup_bot_menu(bot: Bot):
+    global _menu_task
+    _menu_task = asyncio.create_task(_install_bot_menu(bot))
 
 
 async def main():
@@ -76,6 +93,8 @@ async def main():
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         sched.stop()
+        if _menu_task and not _menu_task.done():
+            _menu_task.cancel()
         await bot.session.close()
         logger.info("Бот остановлен")
 
