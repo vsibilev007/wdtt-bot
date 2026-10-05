@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import math
 from typing import Optional
+from urllib.parse import quote
 
 import tz as _tz
 
@@ -184,7 +185,15 @@ def format_user_link(user: dict, inbound: dict = None) -> str:
     # VK hash из user
     vk_hash = user.get("vk_hash", "")
 
+    # CSQTT (WRAP CSQTT-WRAP-v1 + VKQUIC): csqtt://password@host:peerPort.
+    # Peer-порт — dtls_port: на нём сервер слушает DTLS + WRAP. Пароль
+    # percent-кодируется — клиент делает removingPercentEncoding.
+    csqtt_link = f"csqtt://{quote(pwd, safe='')}@{host}:{dtls_port}"
+
     lines = [f"<b>🔗 Ссылки — {label}</b>\n"]
+
+    lines.append("<b>CSQTT — WRAP v1 + VKQUIC</b>")
+    lines.append(f"<code>{csqtt_link}</code>\n")
 
     # Формируем colon-ссылки: wdtt://host:dtls:wg:local:pass:hash[#name]
     def _colon(local_port: int, hash_limit: int = 0, with_name: bool = False) -> str:

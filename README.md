@@ -382,9 +382,19 @@ TELEGRAM_PROXY_URL=http://host:port
 
 ---
 
-## Ссылки `wdtt://`
+## Ссылки `csqtt://` и `wdtt://`
 
-Бот показывает в карточке пользователя готовые ссылки формата:
+Бот показывает в карточке пользователя ссылки двух типов.
+
+**CSQTT** (WRAP CSQTT-WRAP-v1 + VKQUIC) — для iOS VK Turn Proxy, CSQTT Android/Desktop:
+
+```
+csqtt://password@host:peerPort
+```
+
+Peer-порт — `dtls_port` из inbound: на нём сервер WDTT слушает DTLS + WRAP. Пароль percent-кодируется (клиент декодирует сам), VK-хеш в ссылку не входит — клиент авторизуется в VK самостоятельно.
+
+**WDTT** — colon-формат:
 
 ```
 wdtt://host:dtls_port:wg_port:local_port:password:vk_hash[#имя]
