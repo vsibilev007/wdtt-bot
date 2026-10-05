@@ -10,7 +10,6 @@ from __future__ import annotations
 import asyncio
 import json as json_lib
 import logging
-from dataclasses import dataclass
 from typing import Any
 
 import aiohttp
@@ -246,86 +245,3 @@ class WdtClient:
             return True
         except Exception:
             return False
-
-
-# ─── Кластерные операции ─────────────────────────────────────────────────────
-
-@dataclass
-class NodeResult:
-    """Результат операции на одном узле кластера."""
-    server_name: str
-    ok: bool
-    data: Any = None
-    error: str = ""
-
-
-async def cluster_read(servers: list, method_name: str, *args, **kwargs) -> Any:
-    """Читает данные с первого доступного узла кластера."""
-    last_error = None
-    for srv in servers:
-        try:
-            client = WdtClient(srv.url, srv.username, srv.password)
-            method = getattr(client, method_name)
-            return await method(*args, **kwargs)
-        except ApiError as e:
-            last_error = e
-            continue
-    raise last_error or ApiError("unreachable", "Все узлы кластера недоступны")
-
-
-async def cluster_write(
-    servers: list,
-    method_name: str,
-    *args,
-    **kwargs,
-) -> list[NodeResult]:
-    """Выполняет write-операцию параллельно на всех узлах кластера."""
-    async def _call_one(srv) -> NodeResult:
-        try:
-            client = WdtClient(srv.url, srv.username, srv.password)
-            method = getattr(client, method_name)
-            data = await method(*args, **kwargs)
-            return NodeResult(server_name=srv.name, ok=True, data=data)
-        except ApiError as e:
-            return NodeResult(server_name=srv.name, ok=False, error=f"{e.code}: {e.message}")
-        except Exception as e:
-            return NodeResult(server_name=srv.name, ok=False, error=str(e)[:100])
-
-    results = await asyncio.gather(*[_call_one(srv) for srv in servers])
-    return list(results)
-
-
-async def cluster_users_with_nodes(servers: list) -> list[dict]:
-    """
-    Получает список пользователей со всех узлов кластера.
-    Объединяет по password_key (или password, если ключа нет) и добавляет
-    _nodes: {имя узла: online}. Если недоступны все узлы — бросает исключение.
-    """
-    async def _get_users_from(srv) -> tuple[str, dict, Exception | None]:
-        try:
-            client = WdtClient(srv.url, srv.username, srv.password)
-            data = await client.get_users()
-            return srv.name, data, None
-        except Exception as e:
-            return srv.name, {"users": []}, e
-
-    results = await asyncio.gather(*[_get_users_from(srv) for srv in servers])
-
-    errors = [e for _, _, e in results if e is not None]
-    if errors and len(errors) == len(results):
-        if isinstance(errors[0], ApiError):
-            raise errors[0]
-        raise ApiError("unreachable", str(errors[0])[:100])
-
-    users_by_pwd: dict[str, dict] = {}
-    for srv_name, data, _e in results:
-        for u in data.get("users", []):
-            pwd = u.get("password_key", "") or u.get("password", "")
-            if not pwd:
-                continue
-            if pwd not in users_by_pwd:
-                users_by_pwd[pwd] = dict(u)
-                users_by_pwd[pwd]["_nodes"] = {}
-            users_by_pwd[pwd]["_nodes"][srv_name] = u.get("online", False)
-
-    return list(users_by_pwd.values())

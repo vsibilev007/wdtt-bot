@@ -8,11 +8,7 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 # ─── Главное меню ─────────────────────────────────────────────────────────────
 
-def main_menu_kb(
-    servers: list,
-    current: int = 0,
-    config=None,
-) -> InlineKeyboardMarkup:
+def main_menu_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
 
     kb.button(text="📊 Dashboard",     callback_data="menu:dashboard")
@@ -23,28 +19,7 @@ def main_menu_kb(
     kb.button(text="🚨 Алерты",        callback_data="menu:alerts")
     kb.button(text="➕ Новый клиент",   callback_data="user:add")
     kb.button(text="📤 Экспорт",       callback_data="menu:export")
-    schema_base = [2, 2, 2, 2]
-
-    # Переключатель серверов
-    menu_servers = config.get_menu_servers() if config else servers
-    if len(menu_servers) > 1:
-        for i, srv in enumerate(menu_servers):
-            is_current = False
-            if config:
-                cur_srv = servers[current] if current < len(servers) else None
-                if cur_srv:
-                    if srv.group and cur_srv.group == srv.group:
-                        is_current = True
-                    elif not srv.group and srv.name == cur_srv.name:
-                        is_current = True
-            mark = "✅ " if is_current else ""
-            cluster_icon = "⚙️ " if config and config.is_cluster(srv) else ""
-            display_name = srv.group if (config and config.is_cluster(srv)) else srv.name
-            real_idx = servers.index(srv) if srv in servers else i
-            kb.button(text=f"{mark}{cluster_icon}{display_name}", callback_data=f"server:select:{real_idx}")
-        kb.adjust(*schema_base, len(menu_servers))
-    else:
-        kb.adjust(*schema_base)
+    kb.adjust(2, 2, 2, 2)
 
     return kb.as_markup()
 

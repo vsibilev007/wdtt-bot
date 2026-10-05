@@ -16,7 +16,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
-from api_client import ApiError, WdtClient, cluster_write, cluster_read, cluster_users_with_nodes, NodeResult
+from api_client import ApiError
 from config import Config
 import database as db
 from export_utils import users_to_csv, users_to_xlsx
@@ -32,7 +32,7 @@ from keyboards import (
     service_confirm_kb, xray_kb, alerts_kb, export_menu_kb, traffic_report_kb,
     back_kb,
 )
-from session import get_client, get_cached_client, get_server_index, set_server_index
+from session import get_client, get_cached_client
 import charts
 from states import AddUserFSM, EditFieldFSM, SearchUserFSM, InboundEditFSM
 from database import set_alert, get_alert
@@ -57,14 +57,6 @@ def _uid(event) -> int:
     if isinstance(event, CallbackQuery):
         return event.from_user.id
     return event.from_user.id
-
-
-def _format_cluster_result(results: list[NodeResult]) -> str:
-    lines = []
-    for r in results:
-        icon = "✅" if r.ok else "❌"
-        lines.append(f"{icon} <b>{r.server_name}</b>" + (f": {r.error}" if not r.ok else ""))
-    return "\n".join(lines)
 
 
 async def _api_call(target, func, *args, **kwargs):
@@ -99,17 +91,9 @@ async def _safe_edit(cq: CallbackQuery, text: str, reply_markup: InlineKeyboardM
         await cq.answer()
 
 
-async def _fetch_users(user_id: int, config: Config) -> tuple[list[dict], dict]:
-    """Пользователи + inbound. На кластере — merge со всех узлов, inbound с живого узла."""
-    idx = await get_server_index(user_id, config)
-    srv = config.servers[idx]
-    if config.is_cluster(srv):
-        members = config.get_group_members(srv)
-        users = await cluster_users_with_nodes(members)
-        inbound = await cluster_read(members, "get_inbound")
-        return users, inbound
-    client = get_cached_client(srv)
-    data = await client.get_users()
+async def _fetch_users(config: Config) -> tuple[list[dict], dict]:
+    """Пользователи + inbound с панели."""
+    data = await get_cached_client(config.servers[0]).get_users()
     return data.get("users", []), data.get("inbound", {})
 
 
@@ -118,15 +102,14 @@ async def _fetch_users(user_id: int, config: Config) -> tuple[list[dict], dict]:
 @router.message(CommandStart())
 async def cmd_start(message: Message, state: FSMContext, config: Config):
     await state.clear()
-    idx = await get_server_index(message.from_user.id, config)
-    srv = config.servers[idx]
+    srv = config.servers[0]
     text = (
         f"<b>WDTT Manager Bot</b>\n\n"
         f"Сервер: <b>{srv.name}</b>\n"
         f"URL: <code>{srv.url}</code>\n\n"
         f"Выберите действие:"
     )
-    await message.answer(text, reply_markup=main_menu_kb(config.servers, idx, config))
+    await message.answer(text, reply_markup=main_menu_kb())
 
 
 # ─── /menu ───────────────────────────────────────────────────────────────────
@@ -134,17 +117,16 @@ async def cmd_start(message: Message, state: FSMContext, config: Config):
 @router.message(Command("menu"))
 async def cmd_menu(message: Message, state: FSMContext, config: Config):
     await state.clear()
-    idx = await get_server_index(message.from_user.id, config)
-    srv = config.servers[idx]
+    srv = config.servers[0]
 
     client = get_cached_client(srv)
     status = await _api_call(message, client.get_status)
     if status is None:
-        await message.answer("Меню:", reply_markup=main_menu_kb(config.servers, idx, config))
+        await message.answer("Меню:", reply_markup=main_menu_kb())
         return
 
     text = format_status(status, srv.name)
-    await message.answer(text, reply_markup=main_menu_kb(config.servers, idx, config))
+    await message.answer(text, reply_markup=main_menu_kb())
 
 
 # ─── /id ─────────────────────────────────────────────────────────────────────
@@ -198,7 +180,7 @@ async def process_search(message: Message, state: FSMContext, config: Config):
     await state.clear()
     query = message.text.lower().strip()
 
-    users, _inbound = await _api_call(message, _fetch_users, message.from_user.id, config)
+    users, _inbound = await _api_call(message, _fetch_users, config)
     if users is None:
         return
 
@@ -220,24 +202,22 @@ async def process_search(message: Message, state: FSMContext, config: Config):
 
 @router.callback_query(F.data == "menu:main")
 async def cb_menu_main(cq: CallbackQuery, config: Config):
-    idx = await get_server_index(cq.from_user.id, config)
-    srv = config.servers[idx]
+    srv = config.servers[0]
 
-    client = WdtClient(srv.url, srv.username, srv.password)
+    client = get_cached_client(srv)
     status = await _api_call(cq, client.get_status)
     if status is None:
         return
 
     text = format_status(status, srv.name)
-    await _safe_edit(cq, text, main_menu_kb(config.servers, idx, config))
+    await _safe_edit(cq, text, main_menu_kb())
 
 
 @router.callback_query(F.data == "menu:dashboard")
 async def cb_dashboard(cq: CallbackQuery, config: Config):
-    idx = await get_server_index(cq.from_user.id, config)
-    srv = config.servers[idx]
+    srv = config.servers[0]
 
-    client = WdtClient(srv.url, srv.username, srv.password)
+    client = get_cached_client(srv)
     status = await _api_call(cq, client.get_status)
     if status is None:
         return
@@ -253,7 +233,7 @@ async def cb_dashboard_refresh(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "menu:online")
 async def cb_online_sessions(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(cq.from_user.id, config)
+    client, _srv = get_client(config)
     status = await _api_call(cq, client.get_status)
     if status is None:
         return
@@ -266,38 +246,11 @@ async def cb_online_sessions(cq: CallbackQuery, config: Config):
     await _safe_edit(cq, text, kb.as_markup())
 
 
-# ─── Server select ───────────────────────────────────────────────────────────
-
-@router.callback_query(F.data.startswith("server:select:"))
-async def cb_server_select(cq: CallbackQuery, config: Config):
-    try:
-        idx = int(cq.data.split(":")[2])
-    except (IndexError, ValueError):
-        await cq.answer("Ошибка")
-        return
-
-    if idx < 0 or idx >= len(config.servers):
-        await cq.answer("Сервер не найден")
-        return
-
-    await set_server_index(cq.from_user.id, idx)
-    await cq.answer(f"Сервер: {config.servers[idx].name}")
-
-    srv = config.servers[idx]
-    client = WdtClient(srv.url, srv.username, srv.password)
-    status = await _api_call(cq, client.get_status)
-    if status is None:
-        return
-
-    text = format_status(status, srv.name)
-    await _safe_edit(cq, text, main_menu_kb(config.servers, idx, config))
-
-
 # ─── Users list ──────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "menu:users")
 async def cb_users_list(cq: CallbackQuery, config: Config):
-    users, _inbound = await _api_call(cq, _fetch_users, cq.from_user.id, config)
+    users, _inbound = await _api_call(cq, _fetch_users, config)
     if users is None:
         return
 
@@ -313,7 +266,7 @@ async def cb_users_page(cq: CallbackQuery, config: Config):
         await cq.answer("Ошибка")
         return
 
-    users, _inbound = await _api_call(cq, _fetch_users, cq.from_user.id, config)
+    users, _inbound = await _api_call(cq, _fetch_users, config)
     if users is None:
         return
 
@@ -327,7 +280,7 @@ async def cb_users_page(cq: CallbackQuery, config: Config):
 async def cb_user_view(cq: CallbackQuery, config: Config):
     password = cq.data[len("user:view:"):]
 
-    users, inbound = await _api_call(cq, _fetch_users, cq.from_user.id, config)
+    users, _inbound = await _api_call(cq, _fetch_users, config)
     if users is None:
         return
 
@@ -336,7 +289,7 @@ async def cb_user_view(cq: CallbackQuery, config: Config):
         await cq.answer("Пользователь не найден", show_alert=True)
         return
 
-    text = format_user_detail(user, inbound)
+    text = format_user_detail(user)
     await _safe_edit(cq, text, user_detail_kb(password, user.get("active", True)))
 
 
@@ -347,7 +300,7 @@ async def cb_user_toggle(cq: CallbackQuery, config: Config):
     password = cq.data[len("user:toggle:"):]
 
     # Получаем текущее состояние
-    users, _inbound = await _api_call(cq, _fetch_users, cq.from_user.id, config)
+    users, _inbound = await _api_call(cq, _fetch_users, config)
     if users is None:
         return
 
@@ -358,22 +311,10 @@ async def cb_user_toggle(cq: CallbackQuery, config: Config):
 
     new_active = not user.get("active", True)
 
-    idx = await get_server_index(cq.from_user.id, config)
-    srv = config.servers[idx]
-    if config.is_cluster(srv):
-        results = await cluster_write(
-            config.get_group_members(srv), "update_user",
-            old_password=password, active=new_active,
-        )
-        if not any(r.ok for r in results):
-            errs = "; ".join(f"{r.server_name}: {r.error}" for r in results if not r.ok)
-            await cq.answer(f"❌ {errs}"[:190], show_alert=True)
-            return
-    else:
-        client, _srv = await get_client(cq.from_user.id, config)
-        result = await _api_call(cq, client.update_user, old_password=password, active=new_active)
-        if result is None:
-            return
+    client, _srv = get_client(config)
+    result = await _api_call(cq, client.update_user, old_password=password, active=new_active)
+    if result is None:
+        return
 
     await cq.answer("✅ Готово")
     # Обновляем view
@@ -393,17 +334,11 @@ async def cb_user_delete(cq: CallbackQuery):
 async def cb_user_delete_confirm(cq: CallbackQuery, config: Config):
     password = cq.data[len("user:delete_confirm:"):]
 
-    if config.is_cluster(config.servers[await get_server_index(cq.from_user.id, config)]):
-        members = config.get_group_members(config.servers[await get_server_index(cq.from_user.id, config)])
-        results = await cluster_write(members, "delete_user", password)
-        text = _format_cluster_result(results)
-        await _safe_edit(cq, text, back_kb("menu:users"))
-    else:
-        client, srv = await get_client(cq.from_user.id, config)
-        result = await _api_call(cq, client.delete_user, password)
-        if result is None:
-            return
-        await _safe_edit(cq, "✅ Пользователь удалён", back_kb("menu:users"))
+    client, _srv = get_client(config)
+    result = await _api_call(cq, client.delete_user, password)
+    if result is None:
+        return
+    await _safe_edit(cq, "✅ Пользователь удалён", back_kb("menu:users"))
 
 
 # ─── User link ───────────────────────────────────────────────────────────────
@@ -412,7 +347,7 @@ async def cb_user_delete_confirm(cq: CallbackQuery, config: Config):
 async def cb_user_link(cq: CallbackQuery, config: Config):
     password = cq.data[len("user:link:"):]
 
-    users, inbound = await _api_call(cq, _fetch_users, cq.from_user.id, config)
+    users, inbound = await _api_call(cq, _fetch_users, config)
     if users is None:
         return
 
@@ -421,9 +356,7 @@ async def cb_user_link(cq: CallbackQuery, config: Config):
         await cq.answer("Пользователь не найден", show_alert=True)
         return
 
-    idx = await get_server_index(cq.from_user.id, config)
-    srv = config.servers[idx]
-    text = format_user_link(user, inbound, csqtt_port=srv.csqtt_port)
+    text = format_user_link(user, inbound, csqtt_port=config.csqtt_port)
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=f"user:view:{password}")
     await _safe_edit(cq, text, kb.as_markup())
@@ -444,7 +377,7 @@ async def cb_user_traffic_period(cq: CallbackQuery, config: Config):
     password = parts[2]
     days = int(parts[3])
 
-    _client, srv = await get_client(cq.from_user.id, config)
+    _client, srv = await get_client(config)
 
     # Получаем историю из БД
     rows = await db.get_traffic_history(srv.name, password, days)
@@ -467,7 +400,7 @@ async def cb_user_traffic_chart(cq: CallbackQuery, config: Config):
     password = parts[2]
     days = int(parts[3])
 
-    _client, srv = await get_client(cq.from_user.id, config)
+    _client, srv = await get_client(config)
 
     rows = await db.get_traffic_history(srv.name, password, days)
     if len(rows) < 2:
@@ -493,18 +426,9 @@ async def cb_user_traffic_chart(cq: CallbackQuery, config: Config):
 async def cb_user_reset_traffic(cq: CallbackQuery, config: Config):
     password = cq.data[len("user:reset_traffic:"):]
 
-    idx = await get_server_index(cq.from_user.id, config)
-    srv = config.servers[idx]
-    if config.is_cluster(srv):
-        results = await cluster_write(config.get_group_members(srv), "reset_traffic", password)
-        if not any(r.ok for r in results):
-            errs = "; ".join(f"{r.server_name}: {r.error}" for r in results if not r.ok)
-            await cq.answer(f"❌ {errs}"[:190], show_alert=True)
-            return
-    else:
-        client, _srv = await get_client(cq.from_user.id, config)
-        if await _api_call(cq, client.reset_traffic, password) is None:
-            return
+    client, _srv = get_client(config)
+    if await _api_call(cq, client.reset_traffic, password) is None:
+        return
 
     await cq.answer("✅ Трафик сброшен")
     await cb_user_view(cq, config)
@@ -700,23 +624,13 @@ async def adduser_confirm(message: Message, state: FSMContext, config: Config):
     if data.get("vk_hash"):
         payload["vk_hash"] = data["vk_hash"]
 
-    client, srv = await get_client(message.from_user.id, config)
+    client, _srv = get_client(config)
 
-    if config.is_cluster(srv):
-        members = config.get_group_members(srv)
-        results = await cluster_write(members, "add_user", **payload)
-        text = _format_cluster_result(results)
-        ok = any(r.ok for r in results)
-        if ok:
-            pwd = data.get("password", "")
-            text = f"✅ Пользователь создан\nПароль: <code>{pwd}</code>\n\n{text}"
-        await message.answer(text)
-    else:
-        result = await _api_call(message, client.add_user, **payload)
-        if result is None:
-            return
-        pwd = result.get("password", data.get("password", ""))
-        await message.answer(f"✅ Пользователь создан\nПароль: <code>{pwd}</code>")
+    result = await _api_call(message, client.add_user, **payload)
+    if result is None:
+        return
+    pwd = result.get("password", data.get("password", ""))
+    await message.answer(f"✅ Пользователь создан\nПароль: <code>{pwd}</code>")
 
 
 # ─── Edit user ────────────────────────────────────────────────────────────────
@@ -785,27 +699,20 @@ async def process_edit_field(message: Message, state: FSMContext, config: Config
     else:
         payload[field] = value
 
-    client, srv = await get_client(message.from_user.id, config)
+    client, _srv = get_client(config)
 
-    if config.is_cluster(srv):
-        members = config.get_group_members(srv)
-        results = await cluster_write(members, "update_user", **payload)
-        text = _format_cluster_result(results)
-        await state.clear()
-        await message.answer(text)
-    else:
-        result = await _api_call(message, client.update_user, **payload)
-        if result is None:
-            return
-        await state.clear()
-        await message.answer("✅ Пользователь обновлён")
+    result = await _api_call(message, client.update_user, **payload)
+    if result is None:
+        return
+    await state.clear()
+    await message.answer("✅ Пользователь обновлён")
 
 
 # ─── Inbound ──────────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data == "menu:inbound")
 async def cb_inbound(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(cq.from_user.id, config)
+    client, srv = await get_client(config)
     data = await _api_call(cq, client.get_inbound)
     if data is None:
         return
@@ -893,7 +800,7 @@ async def inbound_max_users(message: Message, state: FSMContext, config: Config)
 
     data = await state.get_data()
 
-    client, srv = await get_client(message.from_user.id, config)
+    client, srv = await get_client(config)
 
     # Получаем текущий inbound для сохранения остальных полей.
     # Состояние не сбрасываем: при ошибке можно повторить или /cancel.
@@ -925,7 +832,7 @@ async def inbound_max_users(message: Message, state: FSMContext, config: Config)
 
 @router.callback_query(F.data == "menu:services")
 async def cb_services(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(cq.from_user.id, config)
+    client, srv = await get_client(config)
     status = await _api_call(cq, client.get_status)
     if status is None:
         return
@@ -948,7 +855,7 @@ async def cb_restart_xray(cq: CallbackQuery):
 
 @router.callback_query(F.data == "service:restart_wdtt_confirm")
 async def cb_restart_wdtt_confirm(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(cq.from_user.id, config)
+    client, srv = await get_client(config)
     result = await _api_call(cq, client.restart_wdtt)
     if result is None:
         return
@@ -957,7 +864,7 @@ async def cb_restart_wdtt_confirm(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "service:restart_xray_confirm")
 async def cb_restart_xray_confirm(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(cq.from_user.id, config)
+    client, srv = await get_client(config)
     result = await _api_call(cq, client.restart_xray)
     if result is None:
         return
@@ -968,7 +875,7 @@ async def cb_restart_xray_confirm(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "menu:xray")
 async def cb_xray_menu(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(cq.from_user.id, config)
+    client, srv = await get_client(config)
     status = await _api_call(cq, client.get_status)
     if status is None:
         return
@@ -981,7 +888,7 @@ async def cb_xray_menu(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "xray:config")
 async def cb_xray_config(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(cq.from_user.id, config)
+    client, srv = await get_client(config)
     data = await _api_call(cq, client.get_xray_config)
     if data is None:
         return
@@ -992,7 +899,7 @@ async def cb_xray_config(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "xray:versions")
 async def cb_xray_versions(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(cq.from_user.id, config)
+    client, srv = await get_client(config)
     data = await _api_call(cq, client.get_xray_versions)
     if data is None:
         return
@@ -1006,8 +913,7 @@ async def cb_xray_versions(cq: CallbackQuery, config: Config):
 @router.callback_query(F.data == "menu:alerts")
 async def cb_alerts(cq: CallbackQuery, config: Config):
     uid = cq.from_user.id
-    idx = await get_server_index(uid, config)
-    srv = config.servers[idx]
+    srv = config.servers[0]
 
     states = {}
     for atype in ALERT_TYPES:
@@ -1021,8 +927,7 @@ async def cb_alerts(cq: CallbackQuery, config: Config):
 async def cb_alert_toggle(cq: CallbackQuery, config: Config):
     atype = cq.data[len("alert:toggle:"):]
     uid = cq.from_user.id
-    idx = await get_server_index(uid, config)
-    srv = config.servers[idx]
+    srv = config.servers[0]
 
     current = await get_alert(uid, srv.name, atype)
     await set_alert(uid, srv.name, atype, not current)
@@ -1038,8 +943,7 @@ async def cb_alert_toggle(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "alert:log")
 async def cb_alert_log(cq: CallbackQuery, config: Config):
-    idx = await get_server_index(cq.from_user.id, config)
-    srv = config.servers[idx]
+    srv = config.servers[0]
 
     alerts = await db.get_recent_alerts(srv.name, limit=20)
     text = format_alert_log(alerts)
@@ -1056,11 +960,9 @@ async def cb_export_menu(cq: CallbackQuery):
 
 @router.callback_query(F.data == "users:export:csv")
 async def cb_export_csv(cq: CallbackQuery, config: Config):
-    idx = await get_server_index(cq.from_user.id, config)
-    srv = config.servers[idx]
-    name = srv.group or srv.name
+    name = config.servers[0].name
 
-    users, _inbound = await _api_call(cq, _fetch_users, cq.from_user.id, config)
+    users, _inbound = await _api_call(cq, _fetch_users, config)
     if users is None:
         return
 
@@ -1072,11 +974,9 @@ async def cb_export_csv(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "users:export:xlsx")
 async def cb_export_xlsx(cq: CallbackQuery, config: Config):
-    idx = await get_server_index(cq.from_user.id, config)
-    srv = config.servers[idx]
-    name = srv.group or srv.name
+    name = config.servers[0].name
 
-    users, _inbound = await _api_call(cq, _fetch_users, cq.from_user.id, config)
+    users, _inbound = await _api_call(cq, _fetch_users, config)
     if users is None:
         return
 
@@ -1097,7 +997,7 @@ async def cb_traffic_report_menu(cq: CallbackQuery):
 @router.callback_query(F.data.startswith("traffic_report:"))
 async def cb_traffic_report(cq: CallbackQuery, config: Config):
     days = int(cq.data.split(":")[1])
-    _client, srv = await get_client(cq.from_user.id, config)
+    _client, srv = await get_client(config)
 
     deltas = await db.get_all_users_traffic_delta(srv.name, days)
     if not deltas:
@@ -1114,7 +1014,7 @@ async def cb_traffic_report(cq: CallbackQuery, config: Config):
 @router.callback_query(F.data.startswith("traffic_report_chart:"))
 async def cb_traffic_report_chart(cq: CallbackQuery, config: Config):
     days = int(cq.data.split(":")[1])
-    _client, srv = await get_client(cq.from_user.id, config)
+    _client, srv = await get_client(config)
 
     deltas = await db.get_all_users_traffic_delta(srv.name, days)
     if not deltas:

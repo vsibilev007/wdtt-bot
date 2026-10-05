@@ -65,13 +65,6 @@ async def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_alert_log_lookup
                 ON alert_log(server_name, alert_type, fired_at);
-
-            -- Выбранный сервер для каждого пользователя
-            CREATE TABLE IF NOT EXISTS user_sessions (
-                user_id      INTEGER PRIMARY KEY,
-                server_index INTEGER NOT NULL DEFAULT 0,
-                updated_at   INTEGER NOT NULL DEFAULT 0
-            );
         """)
         # Раньше снапшоты писались под маскированным password (bhv****) и
         # были недостижимы для UI (он ищет по полному password_key). Такие
@@ -267,30 +260,6 @@ async def get_recent_alerts(server_name: str, limit: int = 20) -> list[dict]:
             (server_name, limit),
         ) as cur:
             return [dict(r) for r in await cur.fetchall()]
-
-
-# ─── Сессии пользователей ─────────────────────────────────────────────────────
-
-async def get_user_server_index(user_id: int, default: int = 0) -> int:
-    async with aiosqlite.connect(DB_PATH) as db:
-        async with db.execute(
-            "SELECT server_index FROM user_sessions WHERE user_id=?", (user_id,)
-        ) as cur:
-            row = await cur.fetchone()
-            return row[0] if row else default
-
-
-async def set_user_server_index(user_id: int, index: int):
-    async with aiosqlite.connect(DB_PATH) as db:
-        await db.execute(
-            """INSERT INTO user_sessions(user_id, server_index, updated_at)
-               VALUES(?,?,?)
-               ON CONFLICT(user_id) DO UPDATE SET
-                 server_index=excluded.server_index,
-                 updated_at=excluded.updated_at""",
-            (user_id, index, _now()),
-        )
-        await db.commit()
 
 
 # ─── Очистка ──────────────────────────────────────────────────────────────────

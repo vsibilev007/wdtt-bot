@@ -29,8 +29,6 @@ class ServerConfig:
     url: str
     username: str = "admin"
     password: str = "wdtt"
-    group: str = ""   # Имя кластерной группы. Пусто = одиночный сервер
-    csqtt_port: int = 46000  # UDP-порт CSQTT-сервера (amurcanov/csqtt default)
 
 
 @dataclass
@@ -46,31 +44,8 @@ class Config:
     allowed_users: list[int]
     servers: list[ServerConfig]
     thresholds: AlertThresholds = field(default_factory=AlertThresholds)
-    default_server: int = 0
     tg_proxy_url: str = ""
-
-    def get_group_members(self, server: ServerConfig) -> list[ServerConfig]:
-        """Возвращает все узлы группы. Если сервер одиночный — только он."""
-        if not server.group:
-            return [server]
-        return [s for s in self.servers if s.group == server.group]
-
-    def get_menu_servers(self) -> list[ServerConfig]:
-        """Список серверов для меню — группы показываем как один сервер."""
-        seen_groups: set[str] = set()
-        result: list[ServerConfig] = []
-        for srv in self.servers:
-            if srv.group:
-                if srv.group not in seen_groups:
-                    seen_groups.add(srv.group)
-                    result.append(srv)
-            else:
-                result.append(srv)
-        return result
-
-    def is_cluster(self, server: ServerConfig) -> bool:
-        """True если сервер входит в кластерную группу."""
-        return bool(server.group) and len(self.get_group_members(server)) > 1
+    csqtt_port: int = 46000  # UDP-порт CSQTT-сервера для ссылок csqtt://
 
 
 def _clean(val: str) -> str:
@@ -101,36 +76,12 @@ def load_config() -> Config:
     if not allowed_users:
         raise ValueError("ALLOWED_USERS не задан (укажите Telegram user_id через запятую)")
 
-    # ── Серверы WDTT ──────────────────────────────────────────────────────────
-    servers: list[ServerConfig] = []
-    csqtt_port = _int_env("CSQTT_PORT", 46000)
-    i = 1
-    while True:
-        url = _clean(os.environ.get(f"SERVER_{i}_URL", ""))
-        if not url:
-            break
-        name = _clean(os.environ.get(f"SERVER_{i}_NAME", f"Server {i}"))
-        username = _clean(os.environ.get(f"SERVER_{i}_USERNAME", "admin"))
-        password = _clean(os.environ.get(f"SERVER_{i}_PASSWORD", "wdtt"))
-        group = _clean(os.environ.get(f"SERVER_{i}_GROUP", ""))
-        servers.append(ServerConfig(
-            name=name, url=url.rstrip("/"),
-            username=username, password=password, group=group,
-            csqtt_port=_int_env(f"SERVER_{i}_CSQTT_PORT", csqtt_port),
-        ))
-        i += 1
-
-    # Fallback: одиночный сервер
-    if not servers:
-        url = _clean(os.environ.get("SERVER_URL", "https://127.0.0.1:2860/wdtt"))
-        name = _clean(os.environ.get("SERVER_NAME", "WDTT"))
-        username = _clean(os.environ.get("SERVER_USERNAME", "admin"))
-        password = _clean(os.environ.get("SERVER_PASSWORD", "wdtt"))
-        servers.append(ServerConfig(
-            name=name, url=url.rstrip("/"),
-            username=username, password=password,
-            csqtt_port=csqtt_port,
-        ))
+    # ── Сервер WDTT ───────────────────────────────────────────────────────────
+    url = _clean(os.environ.get("SERVER_URL", "https://127.0.0.1:2860/wdtt"))
+    name = _clean(os.environ.get("SERVER_NAME", "WDTT"))
+    username = _clean(os.environ.get("SERVER_USERNAME", "admin"))
+    password = _clean(os.environ.get("SERVER_PASSWORD", "wdtt"))
+    servers = [ServerConfig(name=name, url=url.rstrip("/"), username=username, password=password)]
 
     thresholds = AlertThresholds(
         wdtt_down=_clean(os.environ.get("ALERT_WDTT_DOWN", "true")).lower() in ("true", "1", "yes"),
@@ -144,4 +95,5 @@ def load_config() -> Config:
         servers=servers,
         thresholds=thresholds,
         tg_proxy_url=_clean(os.environ.get("TELEGRAM_PROXY_URL", "")),
+        csqtt_port=_int_env("CSQTT_PORT", 46000),
     )

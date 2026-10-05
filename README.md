@@ -389,14 +389,14 @@ wdtt-bot/
 ├── bot.py              # Точка входа (Dispatcher, polling, меню команд)
 ├── config.py           # Конфигурация из .env (серверы, пороги алертов)
 ├── api_client.py       # WdtClient (cookie-сессия, auto re-login)
-├── database.py         # SQLite: трафик, алерты, выбор сервера
+├── database.py         # SQLite: история трафика, алерты
 ├── handlers.py         # Обработчики команд, reply-меню и callback
 ├── keyboards.py        # Reply-меню и inline-клавиатуры
 ├── formatters.py       # HTML-форматирование ответов API, ссылки csqtt/wdtt
 ├── scheduler.py        # Фоновые задачи: трафик (15м), health (2м), очистка, heartbeat
 ├── middlewares.py      # AuthMiddleware (allowlist по user_id)
 ├── states.py           # Состояния пошаговых мастеров (aiogram)
-├── session.py          # Выбор сервера + кеш WdtClient (cookie живёт между запросами)
+├── session.py          # Кеш WdtClient (cookie живёт между запросами)
 ├── charts.py           # Графики трафика (matplotlib, тёмная тема)
 ├── export_utils.py     # Экспорт CSV/Excel
 ├── logging_setup.py    # Цветной вывод, ротация файла логов
