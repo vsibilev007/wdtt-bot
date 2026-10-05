@@ -4,15 +4,10 @@
 
 from __future__ import annotations
 
-import asyncio
-import base64
-import json
 import logging
 import re
 import secrets
 from datetime import datetime, timezone, timedelta
-
-import tz as _tz
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -29,12 +24,13 @@ from formatters import (
     format_status, format_users_list, format_user_detail, format_user_link,
     format_inbound, format_services, format_xray_config, format_xray_versions,
     format_alerts, format_alert_log, format_online_sessions, ALERT_TYPES,
+    fmt_bytes,
 )
 from keyboards import (
     main_menu_kb, dashboard_kb, users_list_kb, user_detail_kb, user_edit_kb,
     user_delete_confirm_kb, user_traffic_kb, inbound_kb, services_kb,
     service_confirm_kb, xray_kb, alerts_kb, export_menu_kb, traffic_report_kb,
-    back_kb, noop_kb,
+    back_kb,
 )
 from session import get_client, get_cached_client, get_server_index, set_server_index
 import charts
@@ -444,7 +440,7 @@ async def cb_user_traffic_period(cq: CallbackQuery, config: Config):
     password = parts[2]
     days = int(parts[3])
 
-    client, srv = await get_client(cq.from_user.id, config)
+    _client, srv = await get_client(cq.from_user.id, config)
 
     # Получаем историю из БД
     rows = await db.get_traffic_history(srv.name, password, days)
@@ -456,7 +452,7 @@ async def cb_user_traffic_period(cq: CallbackQuery, config: Config):
     text = (
         f"<b>📊 Трафик — {password[:12]}…</b>\n"
         f"Период: {days}д\n"
-        f"Дельта: {delta['delta_bytes']} байт ({delta['points']} точек)"
+        f"Дельта: {fmt_bytes(delta['delta_bytes'])} ({delta['points']} точек)"
     )
     await _safe_edit(cq, text, user_traffic_kb(password))
 
@@ -467,7 +463,7 @@ async def cb_user_traffic_chart(cq: CallbackQuery, config: Config):
     password = parts[2]
     days = int(parts[3])
 
-    client, srv = await get_client(cq.from_user.id, config)
+    _client, srv = await get_client(cq.from_user.id, config)
 
     rows = await db.get_traffic_history(srv.name, password, days)
     buf = charts.render_user_traffic(rows, password, days, srv.name)
@@ -1087,7 +1083,7 @@ async def cb_traffic_report_menu(cq: CallbackQuery):
 @router.callback_query(F.data.startswith("traffic_report:"))
 async def cb_traffic_report(cq: CallbackQuery, config: Config):
     days = int(cq.data.split(":")[1])
-    client, srv = await get_client(cq.from_user.id, config)
+    _client, srv = await get_client(cq.from_user.id, config)
 
     deltas = await db.get_all_users_traffic_delta(srv.name, days)
     if not deltas:
@@ -1096,7 +1092,7 @@ async def cb_traffic_report(cq: CallbackQuery, config: Config):
 
     text = f"<b>📊 Отчёт по трафику — {days}д</b>\n\n"
     for d in deltas[:10]:
-        text += f"• <code>{d['user_password'][:12]}</code>: {d['delta_bytes']} байт\n"
+        text += f"• <code>{d['user_password'][:12]}</code>: {fmt_bytes(d['delta_bytes'])}\n"
 
     await _safe_edit(cq, text, traffic_report_kb())
 
@@ -1104,7 +1100,7 @@ async def cb_traffic_report(cq: CallbackQuery, config: Config):
 @router.callback_query(F.data.startswith("traffic_report_chart:"))
 async def cb_traffic_report_chart(cq: CallbackQuery, config: Config):
     days = int(cq.data.split(":")[1])
-    client, srv = await get_client(cq.from_user.id, config)
+    _client, srv = await get_client(cq.from_user.id, config)
 
     deltas = await db.get_all_users_traffic_delta(srv.name, days)
     buf = charts.render_traffic_report(deltas, days, srv.name)
@@ -1124,10 +1120,3 @@ async def cb_users_search(cq: CallbackQuery, state: FSMContext):
     await cq.answer()
     await cq.message.answer("🔍 Введите пароль или комментарий для поиска:")
     await state.set_state(SearchUserFSM.waiting_query)
-
-
-# ─── Noop ─────────────────────────────────────────────────────────────────────
-
-@router.callback_query(F.data == "noop")
-async def cb_noop(cq: CallbackQuery):
-    await cq.answer()

@@ -27,4 +27,3 @@ class InboundEditFSM(StatesGroup):
     client_port = State()
     dns = State()
     max_users = State()
-    confirm = State()

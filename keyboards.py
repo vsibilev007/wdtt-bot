@@ -258,9 +258,3 @@ def back_kb(callback_data: str = "menu:main") -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Меню", callback_data=callback_data)
     return kb.as_markup()
-
-
-def noop_kb() -> InlineKeyboardMarkup:
-    kb = InlineKeyboardBuilder()
-    kb.button(text="⏳ Ожидание...", callback_data="noop")
-    return kb.as_markup()

@@ -298,7 +298,7 @@ def format_xray_config(config: dict) -> str:
     if servers:
         lines.append(f"DNS: {', '.join(str(s) for s in servers[:3])}")
 
-    # Полный JSON — только если��ается
+    # Полный JSON — только если помещается
     try:
         pretty = json.dumps(config, indent=2, ensure_ascii=False)
         if len(pretty) <= 3000:
