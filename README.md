@@ -338,7 +338,7 @@ TELEGRAM_PROXY_URL=http://host:port
 csqtt://password@host:csqtt_port
 ```
 
-Порт — UDP-порт CSQTT-сервера (по умолчанию **46000**, задаётся `CSQTT_PORT` или `SERVER_i_CSQTT_PORT`); он не совпадает с портами WDTT (`dtls_port`/`wg_port`). В csqtt-ссылке нет ни VK-хеша, ни device_id — клиент авторизуется в VK сам. Пароль percent-кодируется (клиент декодирует сам).
+Порт — UDP-порт CSQTT-сервера (по умолчанию **46000**, задаётся `CSQTT_PORT`); он не совпадает с портами WDTT (`dtls_port`/`wg_port`). В csqtt-ссылке нет ни VK-хеша, ни device_id — клиент авторизуется в VK сам. Пароль percent-кодируется (клиент декодирует сам).
 
 **WDTT** — colon-формат:
 
