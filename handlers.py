@@ -365,7 +365,8 @@ async def cb_user_toggle(cq: CallbackQuery, config: Config):
             old_password=password, active=new_active,
         )
         if not any(r.ok for r in results):
-            await cq.answer(f"❌ {_format_cluster_result(results)}", show_alert=True)
+            errs = "; ".join(f"{r.server_name}: {r.error}" for r in results if not r.ok)
+            await cq.answer(f"❌ {errs}"[:190], show_alert=True)
             return
     else:
         client, _srv = await get_client(cq.from_user.id, config)
@@ -487,7 +488,8 @@ async def cb_user_reset_traffic(cq: CallbackQuery, config: Config):
     if config.is_cluster(srv):
         results = await cluster_write(config.get_group_members(srv), "reset_traffic", password)
         if not any(r.ok for r in results):
-            await cq.answer(f"❌ {_format_cluster_result(results)}", show_alert=True)
+            errs = "; ".join(f"{r.server_name}: {r.error}" for r in results if not r.ok)
+            await cq.answer(f"❌ {errs}"[:190], show_alert=True)
             return
     else:
         client, _srv = await get_client(cq.from_user.id, config)
