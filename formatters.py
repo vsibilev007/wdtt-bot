@@ -148,8 +148,8 @@ def format_user_detail(user: dict, inbound: dict = None) -> str:
     return "\n".join(lines)
 
 
-def format_user_link(user: dict, inbound: dict = None) -> str:
-    """Форматирует ссылки пользователя по типам клиентов (colon-формат)."""
+def format_user_link(user: dict, inbound: dict = None, csqtt_port: int = 46000) -> str:
+    """Форматирует ссылки пользователя: csqtt:// и wdtt:// (colon-формат)."""
     comment = user.get("comment", "")
     # password_key — полный пароль, password — маскированный
     pwd = user.get("password_key", "") or user.get("password", "")
@@ -186,9 +186,11 @@ def format_user_link(user: dict, inbound: dict = None) -> str:
     vk_hash = user.get("vk_hash", "")
 
     # CSQTT (WRAP CSQTT-WRAP-v1 + VKQUIC): csqtt://password@host:peerPort.
-    # Peer-порт — dtls_port: на нём сервер слушает DTLS + WRAP. Пароль
-    # percent-кодируется — клиент делает removingPercentEncoding.
-    csqtt_link = f"csqtt://{quote(pwd, safe='')}@{host}:{dtls_port}"
+    # Peer-порт — порт CSQTT-сервера (amurcanov/csqtt, по умолчанию 46000),
+    # он НЕ совпадает с dtls_port. В ссылке нет ни vk-хеша, ни device_id —
+    # клиент авторизуется в VK сам. Пароль percent-кодируется — клиент
+    # делает removingPercentEncoding.
+    csqtt_link = f"csqtt://{quote(pwd, safe='')}@{host}:{csqtt_port}"
 
     lines = [f"<b>🔗 Ссылки — {label}</b>\n"]
 

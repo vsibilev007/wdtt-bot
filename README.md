@@ -389,10 +389,10 @@ TELEGRAM_PROXY_URL=http://host:port
 **CSQTT** (WRAP CSQTT-WRAP-v1 + VKQUIC) — для iOS VK Turn Proxy, CSQTT Android/Desktop:
 
 ```
-csqtt://password@host:peerPort
+csqtt://password@host:csqtt_port
 ```
 
-Peer-порт — `dtls_port` из inbound: на нём сервер WDTT слушает DTLS + WRAP. Пароль percent-кодируется (клиент декодирует сам), VK-хеш в ссылку не входит — клиент авторизуется в VK самостоятельно.
+Порт — UDP-порт CSQTT-сервера (по умолчанию **46000**, задаётся `CSQTT_PORT` или `SERVER_i_CSQTT_PORT`); он не совпадает с портами WDTT (`dtls_port`/`wg_port`). В csqtt-ссылке нет ни VK-хеша, ни device_id — клиент авторизуется в VK сам. Пароль percent-кодируется (клиент декодирует сам).
 
 **WDTT** — colon-формат:
 

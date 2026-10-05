@@ -420,7 +420,9 @@ async def cb_user_link(cq: CallbackQuery, config: Config):
         await cq.answer("Пользователь не найден", show_alert=True)
         return
 
-    text = format_user_link(user, inbound)
+    idx = await get_server_index(cq.from_user.id, config)
+    srv = config.servers[idx]
+    text = format_user_link(user, inbound, csqtt_port=srv.csqtt_port)
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=f"user:view:{password}")
     await _safe_edit(cq, text, kb.as_markup())

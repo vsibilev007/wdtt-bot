@@ -30,6 +30,7 @@ class ServerConfig:
     username: str = "admin"
     password: str = "wdtt"
     group: str = ""   # Имя кластерной группы. Пусто = одиночный сервер
+    csqtt_port: int = 46000  # UDP-порт CSQTT-сервера (amurcanov/csqtt default)
 
 
 @dataclass
@@ -102,6 +103,7 @@ def load_config() -> Config:
 
     # ── Серверы WDTT ──────────────────────────────────────────────────────────
     servers: list[ServerConfig] = []
+    csqtt_port = _int_env("CSQTT_PORT", 46000)
     i = 1
     while True:
         url = _clean(os.environ.get(f"SERVER_{i}_URL", ""))
@@ -114,6 +116,7 @@ def load_config() -> Config:
         servers.append(ServerConfig(
             name=name, url=url.rstrip("/"),
             username=username, password=password, group=group,
+            csqtt_port=_int_env(f"SERVER_{i}_CSQTT_PORT", csqtt_port),
         ))
         i += 1
 
@@ -126,6 +129,7 @@ def load_config() -> Config:
         servers.append(ServerConfig(
             name=name, url=url.rstrip("/"),
             username=username, password=password,
+            csqtt_port=csqtt_port,
         ))
 
     thresholds = AlertThresholds(
