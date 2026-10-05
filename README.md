@@ -405,7 +405,7 @@ wdtt://host:dtls_port:wg_port:local_port:password:vk_hash[#имя]
 ```
 wdtt-bot/
 ├── bot.py              # Точка входа (Dispatcher, polling, меню команд)
-├── config.py           # Конфигурация из .env (серверы, кластеры, пороги)
+├── config.py           # Конфигурация из .env (серверы, пороги алертов)
 ├── api_client.py       # WdtClient (cookie-сессия, auto re-login)
 ├── database.py         # SQLite: трафик, алерты, выбор сервера
 ├── handlers.py         # Обработчики команд, reply-меню и callback
