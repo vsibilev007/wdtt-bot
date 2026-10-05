@@ -121,7 +121,8 @@ async def _fetch_users(user_id: int, config: Config) -> tuple[list[dict], dict]:
 # ─── /start ──────────────────────────────────────────────────────────────────
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, config: Config):
+async def cmd_start(message: Message, state: FSMContext, config: Config):
+    await state.clear()
     idx = await get_server_index(message.from_user.id, config)
     srv = config.servers[idx]
     text = (
@@ -136,7 +137,8 @@ async def cmd_start(message: Message, config: Config):
 # ─── /menu ───────────────────────────────────────────────────────────────────
 
 @router.message(Command("menu"))
-async def cmd_menu(message: Message, config: Config):
+async def cmd_menu(message: Message, state: FSMContext, config: Config):
+    await state.clear()
     idx = await get_server_index(message.from_user.id, config)
     srv = config.servers[idx]
 
@@ -153,7 +155,8 @@ async def cmd_menu(message: Message, config: Config):
 # ─── /id ─────────────────────────────────────────────────────────────────────
 
 @router.message(Command("id"))
-async def cmd_id(message: Message):
+async def cmd_id(message: Message, state: FSMContext):
+    await state.clear()
     await message.answer(f"Ваш Telegram ID: <code>{message.from_user.id}</code>")
 
 
@@ -165,6 +168,7 @@ async def cmd_help(message: Message):
         "<b>/menu</b> — Главное меню (Dashboard)\n"
         "<b>/find запрос</b> — Поиск пользователя по паролю или комментарию\n"
         "<b>/id</b> — Ваш Telegram ID\n"
+        "<b>/cancel</b> — Отменить текущее действие\n"
         "<b>/help</b> — Эта справка\n\n"
         "<b>Меню бота:</b>\n"
         "📊 <b>Dashboard</b> — статус сервисов, IP, количество пользователей\n"
@@ -177,6 +181,12 @@ async def cmd_help(message: Message):
         "📤 <b>Экспорт</b> — выгрузка в CSV/Excel\n"
     )
     await message.answer(text)
+
+
+@router.message(Command("cancel"))
+async def cmd_cancel(message: Message, state: FSMContext):
+    await state.clear()
+    await message.answer("❌ Действие отменено. /menu — главное меню.")
 
 
 # ─── /find ───────────────────────────────────────────────────────────────────
@@ -198,7 +208,8 @@ async def process_search(message: Message, state: FSMContext, config: Config):
 
     found = [
         u for u in users
-        if query in u.get("password", "").lower() or query in u.get("comment", "").lower()
+        if query in (u.get("password_key", "") or u.get("password", "")).lower()
+        or query in u.get("comment", "").lower()
     ]
 
     if not found:

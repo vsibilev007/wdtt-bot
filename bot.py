@@ -31,6 +31,7 @@ async def setup_bot_menu(bot: Bot):
     commands = [
         BotCommand(command="menu",    description="Главное меню"),
         BotCommand(command="find",    description="Поиск пользователя"),
+        BotCommand(command="cancel",  description="Отменить текущее действие"),
         BotCommand(command="id",      description="Ваш Telegram ID"),
         BotCommand(command="help",    description="Справка по командам"),
     ]
