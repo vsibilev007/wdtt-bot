@@ -298,23 +298,29 @@ async def cluster_write(
 async def cluster_users_with_nodes(servers: list) -> list[dict]:
     """
     Получает список пользователей со всех узлов кластера.
-    Объединяет пользователей по password (уникальный идентификатор в WDTT).
+    Объединяет по password_key (или password, если ключа нет) и добавляет
+    _nodes: {имя узла: online}. Если недоступны все узлы — бросает исключение.
     """
-    async def _get_users_from(srv) -> tuple[str, dict]:
+    async def _get_users_from(srv) -> tuple[str, dict, Exception | None]:
         try:
             client = WdtClient(srv.url, srv.username, srv.password)
             data = await client.get_users()
-            return srv.name, data
-        except Exception:
-            return srv.name, {"users": []}
+            return srv.name, data, None
+        except Exception as e:
+            return srv.name, {"users": []}, e
 
     results = await asyncio.gather(*[_get_users_from(srv) for srv in servers])
 
+    errors = [e for _, _, e in results if e is not None]
+    if errors and len(errors) == len(results):
+        if isinstance(errors[0], ApiError):
+            raise errors[0]
+        raise ApiError("unreachable", str(errors[0])[:100])
+
     users_by_pwd: dict[str, dict] = {}
-    for srv_name, data in results:
-        users = data.get("users", [])
-        for u in users:
-            pwd = u.get("password", "")
+    for srv_name, data, _e in results:
+        for u in data.get("users", []):
+            pwd = u.get("password_key", "") or u.get("password", "")
             if not pwd:
                 continue
             if pwd not in users_by_pwd:

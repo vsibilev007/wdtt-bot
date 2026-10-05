@@ -110,7 +110,13 @@ def format_user_detail(user: dict, inbound: dict = None) -> str:
 
     lines.append(f"Пароль: <code>{pwd}</code>")
     lines.append(f"Активен: {fmt_bool(user.get('active', True))}")
-    lines.append(f"Онлайн: {fmt_bool(user.get('online', False))}")
+
+    nodes = user.get("_nodes", {})
+    if nodes:
+        node_str = ", ".join(f"{n} {'✅' if on else '❌'}" for n, on in nodes.items())
+        lines.append(f"Онлайн: {node_str}")
+    else:
+        lines.append(f"Онлайн: {fmt_bool(user.get('online', False))}")
 
     expires = user.get("expires", "бессрочно")
     lines.append(f"Истекает: {expires}")

@@ -37,7 +37,7 @@ from keyboards import (
     back_kb, noop_kb,
 )
 from qr_utils import make_qr_bytes
-from session import get_client, get_server_index, set_server_index
+from session import get_client, get_cached_client, get_server_index, set_server_index
 import charts
 from states import AddUserFSM, EditFieldFSM, SearchUserFSM, InboundEditFSM
 from database import set_alert, get_alert
@@ -102,6 +102,20 @@ async def _safe_edit(cq: CallbackQuery, text: str, reply_markup: InlineKeyboardM
         logger.debug("Ошибка edit_text: %s", e)
     finally:
         await cq.answer()
+
+
+async def _fetch_users(user_id: int, config: Config) -> tuple[list[dict], dict]:
+    """Пользователи + inbound. На кластере — merge со всех узлов, inbound с живого узла."""
+    idx = await get_server_index(user_id, config)
+    srv = config.servers[idx]
+    if config.is_cluster(srv):
+        members = config.get_group_members(srv)
+        users = await cluster_users_with_nodes(members)
+        inbound = await cluster_read(members, "get_inbound")
+        return users, inbound
+    client = get_cached_client(srv)
+    data = await client.get_users()
+    return data.get("users", []), data.get("inbound", {})
 
 
 # ─── /start ──────────────────────────────────────────────────────────────────
@@ -178,12 +192,10 @@ async def process_search(message: Message, state: FSMContext, config: Config):
     await state.clear()
     query = message.text.lower().strip()
 
-    client, srv = await get_client(message.from_user.id, config)
-    data = await _api_call(message, client.get_users)
-    if data is None:
+    users, _inbound = await _api_call(message, _fetch_users, message.from_user.id, config)
+    if users is None:
         return
 
-    users = data.get("users", [])
     found = [
         u for u in users
         if query in u.get("password", "").lower() or query in u.get("comment", "").lower()
@@ -278,12 +290,10 @@ async def cb_server_select(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "menu:users")
 async def cb_users_list(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(cq.from_user.id, config)
-    data = await _api_call(cq, client.get_users)
-    if data is None:
+    users, _inbound = await _api_call(cq, _fetch_users, cq.from_user.id, config)
+    if users is None:
         return
 
-    users = data.get("users", [])
     text = format_users_list(users, page=0)
     await _safe_edit(cq, text, users_list_kb(users, page=0))
 
@@ -296,12 +306,10 @@ async def cb_users_page(cq: CallbackQuery, config: Config):
         await cq.answer("Ошибка")
         return
 
-    client, srv = await get_client(cq.from_user.id, config)
-    data = await _api_call(cq, client.get_users)
-    if data is None:
+    users, _inbound = await _api_call(cq, _fetch_users, cq.from_user.id, config)
+    if users is None:
         return
 
-    users = data.get("users", [])
     text = format_users_list(users, page=page)
     await _safe_edit(cq, text, users_list_kb(users, page=page))
 
@@ -312,18 +320,15 @@ async def cb_users_page(cq: CallbackQuery, config: Config):
 async def cb_user_view(cq: CallbackQuery, config: Config):
     password = cq.data[len("user:view:"):]
 
-    client, srv = await get_client(cq.from_user.id, config)
-    data = await _api_call(cq, client.get_users)
-    if data is None:
+    users, inbound = await _api_call(cq, _fetch_users, cq.from_user.id, config)
+    if users is None:
         return
 
-    users = data.get("users", [])
     user = next((u for u in users if (u.get("password_key", "") or u.get("password", "")) == password), None)
     if not user:
         await cq.answer("Пользователь не найден", show_alert=True)
         return
 
-    inbound = data.get("inbound", {})
     text = format_user_detail(user, inbound)
     await _safe_edit(cq, text, user_detail_kb(password, user.get("active", True)))
 
@@ -334,23 +339,33 @@ async def cb_user_view(cq: CallbackQuery, config: Config):
 async def cb_user_toggle(cq: CallbackQuery, config: Config):
     password = cq.data[len("user:toggle:"):]
 
-    client, srv = await get_client(cq.from_user.id, config)
-
     # Получаем текущее состояние
-    data = await _api_call(cq, client.get_users)
-    if data is None:
+    users, _inbound = await _api_call(cq, _fetch_users, cq.from_user.id, config)
+    if users is None:
         return
 
-    users = data.get("users", [])
     user = next((u for u in users if (u.get("password_key", "") or u.get("password", "")) == password), None)
     if not user:
         await cq.answer("Пользователь не найден", show_alert=True)
         return
 
     new_active = not user.get("active", True)
-    result = await _api_call(cq, client.update_user, old_password=password, active=new_active)
-    if result is None:
-        return
+
+    idx = await get_server_index(cq.from_user.id, config)
+    srv = config.servers[idx]
+    if config.is_cluster(srv):
+        results = await cluster_write(
+            config.get_group_members(srv), "update_user",
+            old_password=password, active=new_active,
+        )
+        if not any(r.ok for r in results):
+            await cq.answer(f"❌ {_format_cluster_result(results)}", show_alert=True)
+            return
+    else:
+        client, _srv = await get_client(cq.from_user.id, config)
+        result = await _api_call(cq, client.update_user, old_password=password, active=new_active)
+        if result is None:
+            return
 
     await cq.answer("✅ Готово")
     # Обновляем view
@@ -389,13 +404,10 @@ async def cb_user_delete_confirm(cq: CallbackQuery, config: Config):
 async def cb_user_link(cq: CallbackQuery, config: Config):
     password = cq.data[len("user:link:"):]
 
-    client, srv = await get_client(cq.from_user.id, config)
-    data = await _api_call(cq, client.get_users)
-    if data is None:
+    users, inbound = await _api_call(cq, _fetch_users, cq.from_user.id, config)
+    if users is None:
         return
 
-    users = data.get("users", [])
-    inbound = data.get("inbound", {})
     user = next((u for u in users if (u.get("password_key", "") or u.get("password", "")) == password), None)
     if not user:
         await cq.answer("Пользователь не найден", show_alert=True)
@@ -490,10 +502,17 @@ async def cb_user_traffic_chart(cq: CallbackQuery, config: Config):
 async def cb_user_reset_traffic(cq: CallbackQuery, config: Config):
     password = cq.data[len("user:reset_traffic:"):]
 
-    client, srv = await get_client(cq.from_user.id, config)
-    result = await _api_call(cq, client.reset_traffic, password)
-    if result is None:
-        return
+    idx = await get_server_index(cq.from_user.id, config)
+    srv = config.servers[idx]
+    if config.is_cluster(srv):
+        results = await cluster_write(config.get_group_members(srv), "reset_traffic", password)
+        if not any(r.ok for r in results):
+            await cq.answer(f"❌ {_format_cluster_result(results)}", show_alert=True)
+            return
+    else:
+        client, _srv = await get_client(cq.from_user.id, config)
+        if await _api_call(cq, client.reset_traffic, password) is None:
+            return
 
     await cq.answer("✅ Трафик сброшен")
     await cb_user_view(cq, config)
@@ -1043,28 +1062,32 @@ async def cb_export_menu(cq: CallbackQuery):
 
 @router.callback_query(F.data == "users:export:csv")
 async def cb_export_csv(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(cq.from_user.id, config)
-    data = await _api_call(cq, client.get_users)
-    if data is None:
+    idx = await get_server_index(cq.from_user.id, config)
+    srv = config.servers[idx]
+    name = srv.group or srv.name
+
+    users, _inbound = await _api_call(cq, _fetch_users, cq.from_user.id, config)
+    if users is None:
         return
 
-    users = data.get("users", [])
-    csv_bytes = users_to_csv(users, srv.name)
-    doc = BufferedInputFile(csv_bytes, filename=f"wdtt_users_{srv.name}.csv")
+    csv_bytes = users_to_csv(users, name)
+    doc = BufferedInputFile(csv_bytes, filename=f"wdtt_users_{name}.csv")
     await cq.message.answer_document(doc, caption=f"📄 CSV — {len(users)} пользователей")
     await cq.answer()
 
 
 @router.callback_query(F.data == "users:export:xlsx")
 async def cb_export_xlsx(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(cq.from_user.id, config)
-    data = await _api_call(cq, client.get_users)
-    if data is None:
+    idx = await get_server_index(cq.from_user.id, config)
+    srv = config.servers[idx]
+    name = srv.group or srv.name
+
+    users, _inbound = await _api_call(cq, _fetch_users, cq.from_user.id, config)
+    if users is None:
         return
 
-    users = data.get("users", [])
-    xlsx_bytes = users_to_xlsx(users, srv.name)
-    doc = BufferedInputFile(xlsx_bytes, filename=f"wdtt_users_{srv.name}.xlsx")
+    xlsx_bytes = users_to_xlsx(users, name)
+    doc = BufferedInputFile(xlsx_bytes, filename=f"wdtt_users_{name}.xlsx")
     await cq.message.answer_document(doc, caption=f"📊 Excel — {len(users)} пользователей")
     await cq.answer()
 
