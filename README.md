@@ -409,8 +409,6 @@ wdtt://host:dtls_port:wg_port:local_port:password:vk_hash[#имя]
 
 Хост берётся из `default_link_host` inbound (фолбэк — `server_host`).
 
-Бот также показывает базовую ссылку подключения в карточке пользователя.
-
 ---
 
 ## Структура проекта

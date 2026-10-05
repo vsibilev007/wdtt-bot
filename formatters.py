@@ -140,11 +140,6 @@ def format_user_detail(user: dict, inbound: dict = None) -> str:
     if device_ids:
         lines.append(f"Device IDs: {', '.join(device_ids[:3])}")
 
-    link = user.get("link", "")
-    if link:
-        lines.append(f"\n<b>Ссылка:</b>")
-        lines.append(f"<code>{link}</code>")
-
     return "\n".join(lines)
 
 
