@@ -2,66 +2,11 @@
 Клавиатуры и inline-кнопки
 """
 
-from aiogram.types import InlineKeyboardMarkup, ReplyKeyboardMarkup
-from aiogram.utils.keyboard import InlineKeyboardBuilder, ReplyKeyboardBuilder
+from aiogram.types import InlineKeyboardMarkup
+from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
 # ─── Главное меню ─────────────────────────────────────────────────────────────
-
-def main_menu_reply_kb(config=None, current: int = 0) -> ReplyKeyboardMarkup:
-    """
-    Постоянная reply-клавиатура главного меню: крупные адаптивные кнопки
-    внизу экрана (inline-кнопки Telegram фиксированной высоты не меняет).
-    """
-    kb = ReplyKeyboardBuilder()
-    kb.button(text="📊 Dashboard")
-    kb.button(text="👥 Пользователи")
-    kb.button(text="🔧 Inbound")
-    kb.button(text="🔄 Сервисы")
-    kb.button(text="📡 Xray")
-    kb.button(text="🚨 Алерты")
-    kb.button(text="➕ Новый клиент")
-    kb.button(text="📤 Экспорт")
-    rows = [2, 2, 2, 2]
-
-    if config:
-        menu_servers = config.get_menu_servers()
-        if len(menu_servers) > 1:
-            cur = config.servers[current] if current < len(config.servers) else None
-            name = cur.group if (cur and config.is_cluster(cur)) else (cur.name if cur else "")
-            kb.button(text=f"🖥 Сервер: {name}")
-            rows.append(1)
-
-    kb.adjust(*rows)
-    return ReplyKeyboardMarkup(
-        keyboard=kb.export(),
-        resize_keyboard=True,
-        is_persistent=True,
-        input_field_placeholder="Выберите раздел или /help",
-    )
-
-
-def server_select_kb(servers: list, current: int = 0, config=None) -> InlineKeyboardMarkup:
-    """Inline-выбор сервера (открывается по кнопке «🖥 Сервер: …»)."""
-    kb = InlineKeyboardBuilder()
-    menu_servers = config.get_menu_servers() if config else servers
-    for i, srv in enumerate(menu_servers):
-        is_current = False
-        if config:
-            cur = servers[current] if current < len(servers) else None
-            if cur:
-                if srv.group and cur.group == srv.group:
-                    is_current = True
-                elif not srv.group and srv.name == cur.name:
-                    is_current = True
-        mark = "✅ " if is_current else ""
-        cluster_icon = "⚙️ " if config and config.is_cluster(srv) else ""
-        display_name = srv.group if (config and config.is_cluster(srv)) else srv.name
-        real_idx = servers.index(srv) if srv in servers else i
-        kb.button(text=f"{mark}{cluster_icon}{display_name}", callback_data=f"server:select:{real_idx}")
-    kb.adjust(1)
-    return kb.as_markup()
-
 
 def main_menu_kb(
     servers: list,
