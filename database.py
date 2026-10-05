@@ -73,6 +73,12 @@ async def init_db():
                 updated_at   INTEGER NOT NULL DEFAULT 0
             );
         """)
+        # Раньше снапшоты писались под маскированным password (bhv****) и
+        # были недостижимы для UI (он ищет по полному password_key). Такие
+        # строки только замусоривали отчёт по трафику — удаляем при старте.
+        await db.execute(
+            "DELETE FROM traffic_history WHERE user_password GLOB '*[*][*][*][*]'"
+        )
         await db.commit()
     logger.info("БД инициализирована: %s", DB_PATH)
 
@@ -81,10 +87,19 @@ async def init_db():
 
 async def save_traffic_snapshot(server_name: str, users: list, inbound: dict):
     now = _now()
-    rows = [
-        (server_name, u.get("password", ""), u.get("traffic_used_fmt", ""), _parse_traffic_bytes(u.get("traffic_used_fmt", "")), int(u.get("online", False)), now)
-        for u in users
-    ]
+    rows = []
+    for u in users:
+        fmt = u.get("traffic_used_fmt", "")
+        if not fmt:
+            # Нет данных — не пишем нулевую точку: она даёт фейковые
+            # провалы/пики в дельтах на графике.
+            continue
+        # Ключ — полный password_key: все UI-пути (карточка, графики)
+        # передают именно его, а password маскирован (bhv****).
+        pwd = u.get("password_key", "") or u.get("password", "")
+        if not pwd:
+            continue
+        rows.append((server_name, pwd, fmt, _parse_traffic_bytes(fmt), int(u.get("online", False)), now))
     if not rows:
         return
     async with aiosqlite.connect(DB_PATH) as db:

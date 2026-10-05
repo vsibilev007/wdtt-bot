@@ -448,7 +448,7 @@ async def cb_user_traffic_period(cq: CallbackQuery, config: Config):
     # Получаем историю из БД
     rows = await db.get_traffic_history(srv.name, password, days)
     if len(rows) < 2:
-        await cq.answer("Недостаточно данных за этот период", show_alert=True)
+        await cq.answer("Истории трафика пока нет — точки собираются каждые 15 минут", show_alert=True)
         return
 
     delta = await db.get_traffic_delta(srv.name, password, days)
@@ -469,9 +469,16 @@ async def cb_user_traffic_chart(cq: CallbackQuery, config: Config):
     _client, srv = await get_client(cq.from_user.id, config)
 
     rows = await db.get_traffic_history(srv.name, password, days)
+    if len(rows) < 2:
+        await cq.answer("Истории трафика пока нет — точки собираются каждые 15 минут", show_alert=True)
+        return
+
     buf = charts.render_user_traffic(rows, password, days, srv.name)
     if buf is None:
-        await cq.answer("Недостаточно данных или matplotlib не установлен", show_alert=True)
+        if not charts.HAS_MPL:
+            await cq.answer("matplotlib не установлен — графики недоступны", show_alert=True)
+        else:
+            await cq.answer("Не удалось построить график — подробности в логах", show_alert=True)
         return
 
     photo = BufferedInputFile(buf.read(), filename="traffic.png")
@@ -1107,9 +1114,15 @@ async def cb_traffic_report_chart(cq: CallbackQuery, config: Config):
     _client, srv = await get_client(cq.from_user.id, config)
 
     deltas = await db.get_all_users_traffic_delta(srv.name, days)
+    if not deltas:
+        await cq.answer("Истории трафика пока нет — точки собираются каждые 15 минут", show_alert=True)
+        return
     buf = charts.render_traffic_report(deltas, days, srv.name)
     if buf is None:
-        await cq.answer("Недостаточно данных или matplotlib не установлен", show_alert=True)
+        if not charts.HAS_MPL:
+            await cq.answer("matplotlib не установлен — графики недоступны", show_alert=True)
+        else:
+            await cq.answer("Не удалось построить график — подробности в логах", show_alert=True)
         return
 
     photo = BufferedInputFile(buf.read(), filename="traffic_report.png")
