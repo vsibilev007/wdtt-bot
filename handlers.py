@@ -36,7 +36,6 @@ from keyboards import (
     service_confirm_kb, xray_kb, alerts_kb, export_menu_kb, traffic_report_kb,
     back_kb, noop_kb,
 )
-from qr_utils import make_qr_bytes
 from session import get_client, get_cached_client, get_server_index, set_server_index
 import charts
 from states import AddUserFSM, EditFieldFSM, SearchUserFSM, InboundEditFSM
@@ -409,7 +408,7 @@ async def cb_user_delete_confirm(cq: CallbackQuery, config: Config):
         await _safe_edit(cq, "✅ Пользователь удалён", back_kb("menu:users"))
 
 
-# ─── User link / QR ──────────────────────────────────────────────────────────
+# ─── User link ───────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("user:link:"))
 async def cb_user_link(cq: CallbackQuery, config: Config):
@@ -428,32 +427,6 @@ async def cb_user_link(cq: CallbackQuery, config: Config):
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=f"user:view:{password}")
     await _safe_edit(cq, text, kb.as_markup())
-
-
-@router.callback_query(F.data.startswith("user:qr:"))
-async def cb_user_qr(cq: CallbackQuery, config: Config):
-    password = cq.data[len("user:qr:"):]
-
-    client, srv = await get_client(cq.from_user.id, config)
-    data = await _api_call(cq, client.get_users)
-    if data is None:
-        return
-
-    users = data.get("users", [])
-    user = next((u for u in users if (u.get("password_key", "") or u.get("password", "")) == password), None)
-    if not user:
-        await cq.answer("Пользователь не найден", show_alert=True)
-        return
-
-    link = user.get("link", "")
-    if not link:
-        await cq.answer("Ссылка недоступна", show_alert=True)
-        return
-
-    qr_bytes = make_qr_bytes(link)
-    photo = BufferedInputFile(qr_bytes, filename="wdtt_qr.png")
-    await cq.message.answer_photo(photo, caption=f"📷 QR для <code>{password[:12]}…</code>")
-    await cq.answer()
 
 
 # ─── User traffic ─────────────────────────────────────────────────────────────
