@@ -13,7 +13,10 @@ from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
-from aiogram.types import BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    BufferedInputFile, CallbackQuery, InlineKeyboardMarkup, Message,
+    ReplyKeyboardRemove,
+)
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 from api_client import ApiError, WdtClient, cluster_write, cluster_read, cluster_users_with_nodes, NodeResult
@@ -27,7 +30,8 @@ from formatters import (
     fmt_bytes,
 )
 from keyboards import (
-    main_menu_kb, dashboard_kb, users_list_kb, user_detail_kb, user_edit_kb,
+    main_menu_kb, main_menu_reply_kb, server_select_kb, dashboard_kb,
+    users_list_kb, user_detail_kb, user_edit_kb,
     user_delete_confirm_kb, user_traffic_kb, inbound_kb, services_kb,
     service_confirm_kb, xray_kb, alerts_kb, export_menu_kb, traffic_report_kb,
     back_kb,
@@ -126,7 +130,7 @@ async def cmd_start(message: Message, state: FSMContext, config: Config):
         f"URL: <code>{srv.url}</code>\n\n"
         f"Выберите действие:"
     )
-    await message.answer(text, reply_markup=main_menu_kb(config.servers, idx, config))
+    await message.answer(text, reply_markup=main_menu_reply_kb(config, idx))
 
 
 # ─── /menu ───────────────────────────────────────────────────────────────────
@@ -137,26 +141,31 @@ async def cmd_menu(message: Message, state: FSMContext, config: Config):
     idx = await get_server_index(message.from_user.id, config)
     srv = config.servers[idx]
 
-    client = WdtClient(srv.url, srv.username, srv.password)
+    client = get_cached_client(srv)
     status = await _api_call(message, client.get_status)
     if status is None:
-        await message.answer("Меню:", reply_markup=main_menu_kb(config.servers, idx, config))
+        await message.answer("Меню:", reply_markup=main_menu_reply_kb(config, idx))
         return
 
     text = format_status(status, srv.name)
-    await message.answer(text, reply_markup=main_menu_kb(config.servers, idx, config))
+    await message.answer(text, reply_markup=main_menu_reply_kb(config, idx))
 
 
 # ─── /id ─────────────────────────────────────────────────────────────────────
 
 @router.message(Command("id"))
-async def cmd_id(message: Message, state: FSMContext):
+async def cmd_id(message: Message, state: FSMContext, config: Config):
     await state.clear()
-    await message.answer(f"Ваш Telegram ID: <code>{message.from_user.id}</code>")
+    idx = await get_server_index(message.from_user.id, config)
+    await message.answer(
+        f"Ваш Telegram ID: <code>{message.from_user.id}</code>",
+        reply_markup=main_menu_reply_kb(config, idx),
+    )
 
 
 @router.message(Command("help"))
-async def cmd_help(message: Message):
+async def cmd_help(message: Message, state: FSMContext, config: Config):
+    await state.clear()
     text = (
         "<b>📖 Справка по командам</b>\n\n"
         "<b>/start</b> — Приветствие и главное меню\n"
@@ -173,22 +182,124 @@ async def cmd_help(message: Message):
         "📡 <b>Xray</b> — конфиг и версии Xray\n"
         "🚨 <b>Алерты</b> — уведомления при проблемах\n"
         "➕ <b>Новый клиент</b> — создание пользователя\n"
-        "📤 <b>Экспорт</b> — выгрузка в CSV/Excel\n"
+        "📤 <b>Экспорт</b> — выгрузка в CSV/Excel\n\n"
+        "Главное меню — крупные кнопки внизу экрана."
     )
-    await message.answer(text)
+    idx = await get_server_index(message.from_user.id, config)
+    await message.answer(text, reply_markup=main_menu_reply_kb(config, idx))
 
 
 @router.message(Command("cancel"))
-async def cmd_cancel(message: Message, state: FSMContext):
+async def cmd_cancel(message: Message, state: FSMContext, config: Config):
     await state.clear()
-    await message.answer("❌ Действие отменено. /menu — главное меню.")
+    idx = await get_server_index(message.from_user.id, config)
+    await message.answer(
+        "❌ Действие отменено.",
+        reply_markup=main_menu_reply_kb(config, idx),
+    )
+
+
+# ─── Главное меню: reply-кнопки ──────────────────────────────────────────────
+# Зарегистрированы ДО FSM-обработчиков: нажатие кнопки меню всегда
+# отменяет текущий мастер и показывает раздел.
+
+@router.message(F.text == "📊 Dashboard")
+async def reply_dashboard(message: Message, state: FSMContext, config: Config):
+    await state.clear()
+    idx = await get_server_index(message.from_user.id, config)
+    srv = config.servers[idx]
+
+    client = get_cached_client(srv)
+    status = await _api_call(message, client.get_status)
+    if status is None:
+        return
+
+    await message.answer(format_status(status, srv.name), reply_markup=dashboard_kb())
+
+
+@router.message(F.text == "👥 Пользователи")
+async def reply_users(message: Message, state: FSMContext, config: Config):
+    await state.clear()
+    users, _inbound = await _api_call(message, _fetch_users, message.from_user.id, config)
+    if users is None:
+        return
+    await message.answer(format_users_list(users, page=0), reply_markup=users_list_kb(users, page=0))
+
+
+@router.message(F.text == "🔧 Inbound")
+async def reply_inbound(message: Message, state: FSMContext, config: Config):
+    await state.clear()
+    client, srv = await get_client(message.from_user.id, config)
+    data = await _api_call(message, client.get_inbound)
+    if data is None:
+        return
+    await message.answer(format_inbound(data), reply_markup=inbound_kb())
+
+
+@router.message(F.text == "🔄 Сервисы")
+async def reply_services(message: Message, state: FSMContext, config: Config):
+    await state.clear()
+    client, srv = await get_client(message.from_user.id, config)
+    status = await _api_call(message, client.get_status)
+    if status is None:
+        return
+    await message.answer(format_services(status), reply_markup=services_kb(status))
+
+
+@router.message(F.text == "📡 Xray")
+async def reply_xray(message: Message, state: FSMContext, config: Config):
+    await state.clear()
+    client, srv = await get_client(message.from_user.id, config)
+    status = await _api_call(message, client.get_status)
+    if status is None:
+        return
+    text = f"<b>📡 Xray</b>\n\nСтатус: {'✅' if status.get('xray_active') else '❌'}"
+    await message.answer(text, reply_markup=xray_kb())
+
+
+@router.message(F.text == "🚨 Алерты")
+async def reply_alerts(message: Message, state: FSMContext, config: Config):
+    await state.clear()
+    uid = message.from_user.id
+    idx = await get_server_index(uid, config)
+    srv = config.servers[idx]
+    states = {atype: await get_alert(uid, srv.name, atype) for atype in ALERT_TYPES}
+    await message.answer(format_alerts(states), reply_markup=alerts_kb(states))
+
+
+@router.message(F.text == "📤 Экспорт")
+async def reply_export(message: Message, state: FSMContext, config: Config):
+    await state.clear()
+    await message.answer(
+        "<b>📤 Экспорт пользователей</b>\n\nВыберите формат:",
+        reply_markup=export_menu_kb(),
+    )
+
+
+@router.message(F.text.startswith("🖥 Сервер:"))
+async def reply_server_switch(message: Message, state: FSMContext, config: Config):
+    await state.clear()
+    idx = await get_server_index(message.from_user.id, config)
+    await message.answer(
+        "🖥 <b>Выберите сервер или кластер</b>",
+        reply_markup=server_select_kb(config.servers, idx, config),
+    )
+
+
+@router.message(F.text == "➕ Новый клиент")
+async def reply_add_user(message: Message, state: FSMContext):
+    await _start_add_user(message, state)
 
 
 # ─── /find ───────────────────────────────────────────────────────────────────
 
 @router.message(Command("find"))
-async def cmd_find(message: Message, state: FSMContext):
-    await message.answer("Введите пароль или комментарий для поиска:")
+async def cmd_find(message: Message, state: FSMContext, config: Config):
+    idx = await get_server_index(message.from_user.id, config)
+    await message.answer(
+        "Введите пароль или комментарий для поиска:",
+        reply_markup=main_menu_reply_kb(config, idx),
+    )
     await state.set_state(SearchUserFSM.waiting_query)
 
 
@@ -511,14 +622,21 @@ async def cb_user_reset_traffic(cq: CallbackQuery, config: Config):
 
 # ─── Add user (FSM) ──────────────────────────────────────────────────────────
 
+async def _start_add_user(message: Message, state: FSMContext):
+    """Вход в мастер создания: скрываем reply-клавиатуру, чтобы кнопки
+    меню не конфликтовали с вводом данных."""
+    await state.set_state(AddUserFSM.comment)
+    await message.answer(
+        "➕ <b>Создание пользователя</b>\n\n"
+        "Введите комментарий (имя) или /skip:",
+        reply_markup=ReplyKeyboardRemove(),
+    )
+
+
 @router.callback_query(F.data == "user:add")
 async def cb_user_add(cq: CallbackQuery, state: FSMContext):
     await cq.answer()
-    await cq.message.answer(
-        "➕ <b>Создание пользователя</b>\n\n"
-        "Введите комментарий (имя) или /skip:"
-    )
-    await state.set_state(AddUserFSM.comment)
+    await _start_add_user(cq.message, state)
 
 
 @router.message(AddUserFSM.comment)
@@ -675,7 +793,8 @@ async def adduser_vk_hash(message: Message, state: FSMContext):
 async def adduser_confirm(message: Message, state: FSMContext, config: Config):
     if message.text.strip() != "/confirm":
         await state.clear()
-        await message.answer("❌ Отменено.")
+        idx = await get_server_index(message.from_user.id, config)
+        await message.answer("❌ Отменено.", reply_markup=main_menu_reply_kb(config, idx))
         return
 
     data = await state.get_data()
@@ -709,13 +828,18 @@ async def adduser_confirm(message: Message, state: FSMContext, config: Config):
         if ok:
             pwd = data.get("password", "")
             text = f"✅ Пользователь создан\nПароль: <code>{pwd}</code>\n\n{text}"
-        await message.answer(text)
+        idx = await get_server_index(message.from_user.id, config)
+        await message.answer(text, reply_markup=main_menu_reply_kb(config, idx))
     else:
         result = await _api_call(message, client.add_user, **payload)
         if result is None:
             return
         pwd = result.get("password", data.get("password", ""))
-        await message.answer(f"✅ Пользователь создан\nПароль: <code>{pwd}</code>")
+        idx = await get_server_index(message.from_user.id, config)
+        await message.answer(
+            f"✅ Пользователь создан\nПароль: <code>{pwd}</code>",
+            reply_markup=main_menu_reply_kb(config, idx),
+        )
 
 
 # ─── Edit user ────────────────────────────────────────────────────────────────
@@ -746,14 +870,16 @@ async def cb_user_editfield(cq: CallbackQuery, state: FSMContext):
 
     await state.update_data(edit_password=password, edit_field=field)
     await cq.answer()
-    await cq.message.answer(f"Введите новое значение для <b>{field_name}</b>:")
+    await cq.message.answer(
+        f"Введите новое значение для <b>{field_name}</b>:",
+        reply_markup=ReplyKeyboardRemove(),
+    )
     await state.set_state(EditFieldFSM.waiting_value)
 
 
 @router.message(EditFieldFSM.waiting_value)
 async def process_edit_field(message: Message, state: FSMContext, config: Config):
     data = await state.get_data()
-    await state.clear()
 
     password = data.get("edit_password", "")
     field = data.get("edit_field", "")
@@ -761,7 +887,7 @@ async def process_edit_field(message: Message, state: FSMContext, config: Config
 
     payload = {"old_password": password}
 
-    # Конвертация значений
+    # Конвертация значений — при ошибке состояние сохраняем, можно повторить
     if field in ("total_gb", "max_devices", "max_down_mbps", "max_up_mbps"):
         try:
             payload[field] = int(value)
@@ -791,12 +917,16 @@ async def process_edit_field(message: Message, state: FSMContext, config: Config
         members = config.get_group_members(srv)
         results = await cluster_write(members, "update_user", **payload)
         text = _format_cluster_result(results)
-        await message.answer(text)
+        await state.clear()
+        idx = await get_server_index(message.from_user.id, config)
+        await message.answer(text, reply_markup=main_menu_reply_kb(config, idx))
     else:
         result = await _api_call(message, client.update_user, **payload)
         if result is None:
             return
-        await message.answer("✅ Пользователь обновлён")
+        await state.clear()
+        idx = await get_server_index(message.from_user.id, config)
+        await message.answer("✅ Пользователь обновлён", reply_markup=main_menu_reply_kb(config, idx))
 
 
 # ─── Inbound ──────────────────────────────────────────────────────────────────
@@ -817,7 +947,8 @@ async def cb_inbound_edit(cq: CallbackQuery, state: FSMContext):
     await cq.answer()
     await cq.message.answer(
         "🔧 <b>Редактирование Inbound</b>\n\n"
-        "DTLS порт (текущий будет показан):"
+        "DTLS порт (текущий будет показан):",
+        reply_markup=ReplyKeyboardRemove(),
     )
     await state.set_state(InboundEditFSM.dtls_port)
 
@@ -890,11 +1021,11 @@ async def inbound_max_users(message: Message, state: FSMContext, config: Config)
     await state.update_data(max_users=max_users)
 
     data = await state.get_data()
-    await state.clear()
 
     client, srv = await get_client(message.from_user.id, config)
 
-    # Получаем текущий inbound для сохранения остальных полей
+    # Получаем текущий inbound для сохранения остальных полей.
+    # Состояние не сбрасываем: при ошибке можно повторить или /cancel.
     inbound = await _api_call(message, client.get_inbound)
     if inbound is None:
         return
@@ -915,7 +1046,12 @@ async def inbound_max_users(message: Message, state: FSMContext, config: Config)
     if result is None:
         return
 
-    await message.answer("✅ Inbound сохранён и WDTT перезапущен")
+    await state.clear()
+    idx = await get_server_index(message.from_user.id, config)
+    await message.answer(
+        "✅ Inbound сохранён и WDTT перезапущен",
+        reply_markup=main_menu_reply_kb(config, idx),
+    )
 
 
 # ─── Services ─────────────────────────────────────────────────────────────────
