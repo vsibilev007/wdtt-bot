@@ -92,8 +92,13 @@ def setup_logging() -> None:
 
     use_color = not os.environ.get("NO_COLOR") and sys.stdout.isatty()
     log_file  = _clean(os.environ.get("LOG_FILE", ""))
-    max_mb    = int(_clean(os.environ.get("LOG_MAX_MB", "10")) or "10")
-    backups   = int(_clean(os.environ.get("LOG_BACKUPS", "3")) or "3")
+    try:
+        max_mb  = int(_clean(os.environ.get("LOG_MAX_MB", "10")) or "10")
+        backups = int(_clean(os.environ.get("LOG_BACKUPS", "3")) or "3")
+    except ValueError:
+        max_mb, backups = 10, 3
+        logger0 = logging.getLogger(__name__)
+        logger0.warning("LOG_MAX_MB/LOG_BACKUPS не числа — использую 10 МБ и 3 ротации")
 
     root = logging.getLogger()
     root.setLevel(logging.DEBUG)

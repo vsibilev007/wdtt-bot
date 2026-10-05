@@ -461,6 +461,7 @@ wdtt-bot/
 ```
 aiogram==3.27.0          # Telegram бот фреймворк
 aiohttp==3.13.5          # Async HTTP клиент
+aiohttp-socks==0.12.0    # SOCKS/HTTP прокси для Telegram API
 aiosqlite==0.22.1        # Async SQLite
 APScheduler==3.11.2      # Фоновые задачи
 openpyxl==3.1.5          # Excel экспорт
