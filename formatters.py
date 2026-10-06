@@ -138,12 +138,15 @@ def format_user_detail(user: dict) -> str:
     return "\n".join(lines)
 
 
-def format_user_link(user: dict, inbound: dict = None, csqtt_port: int = 46000) -> str:
-    """Форматирует ссылки пользователя: csqtt:// и wdtt:// (colon-формат)."""
+def build_user_links(user: dict, inbound: dict = None, csqtt_port: int = 46000) -> list[tuple[str, str]]:
+    """Сырые ссылки подключения: [(заголовок, ссылка), ...].
+
+    Без HTML-экранирования — точный текст нужен copy_text-кнопкам;
+    для отображения в сообщении экранирует format_user_link.
+    """
     comment = user.get("comment", "")
     # password_key — полный пароль, password — маскированный
     pwd = user.get("password_key", "") or user.get("password", "")
-    label = comment if comment else pwd[:12]
 
     # Данные из inbound
     host = ""
@@ -182,43 +185,34 @@ def format_user_link(user: dict, inbound: dict = None, csqtt_port: int = 46000) 
     # делает removingPercentEncoding.
     csqtt_link = f"csqtt://{quote(pwd, safe='')}@{host}:{csqtt_port}"
 
-    lines = [f"<b>🔗 Ссылки — {html.escape(label)}</b>\n"]
-
-    lines.append("<b>CSQTT — WRAP v1 + VKQUIC</b>")
-    lines.append(f"<code>{csqtt_link}</code>\n")
-
-    # Формируем colon-ссылки: wdtt://host:dtls:wg:local:pass:hash[#name]
+    # Colon-ссылки: wdtt://host:dtls:wg:local:pass:hash[#name]
     def _colon(local_port: int, hash_limit: int = 0, with_name: bool = False) -> str:
         h = vk_hash
         if hash_limit and h:
-            parts = h.split(",")
-            h = ",".join(parts[:hash_limit])
-        name_suffix = f"#{html.escape(comment)}" if (with_name and comment) else ""
-        link = (
-            f"wdtt://{html.escape(host)}:{dtls_port}:{wg_port}:{local_port}"
-            f":{html.escape(pwd)}:{html.escape(h)}{name_suffix}"
-        )
-        return f"<code>{link}</code>"
+            h = ",".join(h.split(",")[:hash_limit])
+        name_suffix = f"#{comment}" if (with_name and comment) else ""
+        return f"wdtt://{host}:{dtls_port}:{wg_port}:{local_port}:{pwd}:{h}{name_suffix}"
 
-    # iOS — VK Turn Proxy (1 hash, local=0)
-    ios_link = _colon(0, hash_limit=1)
-    lines.append(f"<b>iOS — VK Turn Proxy</b>")
-    lines.append(f"{ios_link}\n")
+    return [
+        ("CSQTT — WRAP v1 + VKQUIC", csqtt_link),
+        ("iOS — VK Turn Proxy", _colon(0, hash_limit=1)),
+        ("Android — WDTT", _colon(client_port)),
+        ("PWDTT — Desktop", _colon(0, with_name=True)),
+        ("WDTT — Windows", _colon(0, with_name=True)),
+    ]
 
-    # Android — WDTT (up to 4 hashes, local=client_port)
-    android_link = _colon(client_port)
-    lines.append(f"<b>Android — WDTT</b>")
-    lines.append(f"{android_link}\n")
 
-    # PWDTT — Desktop Win/Linux (up to 4 hashes, with name)
-    desktop_link = _colon(0, with_name=True)
-    lines.append(f"<b>PWDTT — Desktop</b>")
-    lines.append(f"{desktop_link}\n")
+def format_user_link(user: dict, inbound: dict = None, csqtt_port: int = 46000) -> str:
+    """Форматирует ссылки пользователя: csqtt:// и wdtt:// (colon-формат)."""
+    comment = user.get("comment", "")
+    # password_key — полный пароль, password — маскированный
+    pwd = user.get("password_key", "") or user.get("password", "")
+    label = comment if comment else pwd[:12]
 
-    # WDTT — Windows (up to 4 hashes, with name)
-    win_link = _colon(0, with_name=True)
-    lines.append(f"<b>WDTT — Windows</b>")
-    lines.append(f"{win_link}")
+    lines = [f"<b>🔗 Ссылки — {html.escape(label)}</b>\n"]
+    for name, link in build_user_links(user, inbound, csqtt_port):
+        lines.append(f"<b>{name}</b>")
+        lines.append(f"<code>{html.escape(link)}</code>\n")
 
     return "\n".join(lines)
 
