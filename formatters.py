@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import html
 import math
 from typing import Optional
 from urllib.parse import quote
@@ -44,7 +45,7 @@ def format_status(obj: dict, server_name: str = "") -> str:
 
     main_pwd = obj.get("main_password", "")
     if main_pwd:
-        lines.append(f"Главный пароль: <code>{main_pwd}</code>")
+        lines.append(f"Главный пароль: <code>{html.escape(main_pwd)}</code>")
 
     stats = obj.get("stats", {})
     if stats:
@@ -54,7 +55,7 @@ def format_status(obj: dict, server_name: str = "") -> str:
             if key == "online" and isinstance(val, list):
                 lines.append(f"  Онлайн сессий: {len(val)}")
                 continue
-            lines.append(f"  {key}: {val}")
+            lines.append(f"  {html.escape(str(key))}: {html.escape(str(val))}")
 
     return "\n".join(lines)
 
@@ -79,10 +80,10 @@ def format_online_sessions(obj: dict) -> str:
         device = s.get("device_id", "")
         sessions = s.get("sessions", "1")
 
-        lines.append(f"<b>{user}</b>")
-        lines.append(f"  IP: {ip} | Режим: {mode} | Сессий: {sessions}")
+        lines.append(f"<b>{html.escape(user)}</b>")
+        lines.append(f"  IP: {html.escape(str(ip))} | Режим: {html.escape(str(mode))} | Сессий: {sessions}")
         if device:
-            lines.append(f"  Устройство: {device[:8]}…")
+            lines.append(f"  Устройство: {html.escape(str(device[:8]))}…")
 
     return "\n".join(lines)
 
@@ -107,14 +108,14 @@ def format_user_detail(user: dict) -> str:
     pwd = user.get("password_key", "") or user.get("password", "")
     label = comment if comment else pwd[:16]
 
-    lines = [f"<b>👤 {label}</b>\n"]
+    lines = [f"<b>👤 {html.escape(label)}</b>\n"]
 
-    lines.append(f"Пароль: <code>{pwd}</code>")
+    lines.append(f"Пароль: <code>{html.escape(pwd)}</code>")
     lines.append(f"Активен: {fmt_bool(user.get('active', True))}")
     lines.append(f"Онлайн: {fmt_bool(user.get('online', False))}")
 
     expires = user.get("expires", "бессрочно")
-    lines.append(f"Истекает: {expires}")
+    lines.append(f"Истекает: {html.escape(str(expires))}")
 
     total_gb = user.get("total_gb", 0)
     if total_gb:
@@ -132,7 +133,7 @@ def format_user_detail(user: dict) -> str:
 
     device_ids = user.get("device_ids", [])
     if device_ids:
-        lines.append(f"Device IDs: {', '.join(device_ids[:3])}")
+        lines.append(f"Device IDs: {html.escape(', '.join(device_ids[:3]))}")
 
     return "\n".join(lines)
 
@@ -181,7 +182,7 @@ def format_user_link(user: dict, inbound: dict = None, csqtt_port: int = 46000) 
     # делает removingPercentEncoding.
     csqtt_link = f"csqtt://{quote(pwd, safe='')}@{host}:{csqtt_port}"
 
-    lines = [f"<b>🔗 Ссылки — {label}</b>\n"]
+    lines = [f"<b>🔗 Ссылки — {html.escape(label)}</b>\n"]
 
     lines.append("<b>CSQTT — WRAP v1 + VKQUIC</b>")
     lines.append(f"<code>{csqtt_link}</code>\n")
@@ -192,8 +193,11 @@ def format_user_link(user: dict, inbound: dict = None, csqtt_port: int = 46000) 
         if hash_limit and h:
             parts = h.split(",")
             h = ",".join(parts[:hash_limit])
-        name_suffix = f"#{comment}" if (with_name and comment) else ""
-        link = f"wdtt://{host}:{dtls_port}:{wg_port}:{local_port}:{pwd}:{h}{name_suffix}"
+        name_suffix = f"#{html.escape(comment)}" if (with_name and comment) else ""
+        link = (
+            f"wdtt://{html.escape(host)}:{dtls_port}:{wg_port}:{local_port}"
+            f":{html.escape(pwd)}:{html.escape(h)}{name_suffix}"
+        )
         return f"<code>{link}</code>"
 
     # iOS — VK Turn Proxy (1 hash, local=0)
@@ -225,13 +229,13 @@ def format_inbound(obj: dict) -> str:
     """Форматирует GET /panel/api/inbound."""
     lines = ["<b>🔧 Настройки подключения (Inbound)</b>\n"]
 
-    lines.append(f"Tag: <code>{obj.get('tag', '—')}</code>")
-    lines.append(f"Remark: {obj.get('remark', '—')}")
-    lines.append(f"Listen: <code>{obj.get('listen_host', '—')}</code>")
+    lines.append(f"Tag: <code>{html.escape(str(obj.get('tag', '—')))}</code>")
+    lines.append(f"Remark: {html.escape(str(obj.get('remark', '—')))}")
+    lines.append(f"Listen: <code>{html.escape(str(obj.get('listen_host', '—')))}</code>")
     lines.append(f"DTLS порт: <code>{obj.get('dtls_port', '—')}</code>")
     lines.append(f"WG порт: <code>{obj.get('wg_port', '—')}</code>")
     lines.append(f"Клиентский порт: <code>{obj.get('client_port', '—')}</code>")
-    lines.append(f"DNS: <code>{obj.get('dns', '—')}</code>")
+    lines.append(f"DNS: <code>{html.escape(str(obj.get('dns', '—')))}</code>")
     lines.append(f"Макс. пользователей: <b>{obj.get('max_users', '—')}</b>")
 
     lines.append("")
@@ -302,7 +306,7 @@ def format_xray_config(config: dict) -> str:
     try:
         pretty = json.dumps(config, indent=2, ensure_ascii=False)
         if len(pretty) <= 3000:
-            lines.append(f"\n<pre>{pretty}</pre>")
+            lines.append(f"\n<pre>{html.escape(pretty)}</pre>")
         else:
             lines.append(f"\n<i>Полный конфиг слишком длинный ({len(pretty)} символов)</i>")
     except Exception:
@@ -317,10 +321,10 @@ def format_xray_versions(versions: dict) -> str:
     # Структура ответа зависит от WDTT
     if isinstance(versions, list):
         for v in versions[:20]:
-            lines.append(f"  • {v}")
+            lines.append(f"  • {html.escape(str(v))}")
     elif isinstance(versions, dict):
         for k, v in versions.items():
-            lines.append(f"  {k}: {v}")
+            lines.append(f"  {html.escape(str(k))}: {html.escape(str(v))}")
     return "\n".join(lines)
 
 
@@ -356,7 +360,7 @@ def format_alert_log(alerts: list) -> str:
         msg = a.get("message", "")
         fired = a.get("fired_at", 0)
         dt_str = _tz.fmt_datetime(fired) if fired else "—"
-        lines.append(f"• <b>{atype}</b> — {dt_str}")
+        lines.append(f"• <b>{html.escape(atype)}</b> — {dt_str}")
         if msg:
-            lines.append(f"  {msg[:100]}")
+            lines.append(f"  {html.escape(msg[:100])}")
     return "\n".join(lines)

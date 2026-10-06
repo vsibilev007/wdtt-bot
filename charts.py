@@ -7,8 +7,10 @@ from __future__ import annotations
 import copy as _copy
 import io
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import timedelta
 from typing import Optional
+
+from tz import from_epoch
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +92,7 @@ def render_user_traffic(
     try:
         times, deltas, online_counts = [], [], []
         for i in range(1, len(rows)):
-            dt = datetime.fromtimestamp(rows[i]["sampled_at"], tz=timezone.utc)
+            dt = from_epoch(rows[i]["sampled_at"])
             d = max(0, rows[i]["traffic_bytes"] - rows[i - 1]["traffic_bytes"])
             times.append(dt)
             deltas.append(d)

@@ -4,6 +4,7 @@
 
 from __future__ import annotations
 
+import html
 import logging
 import re
 import secrets
@@ -41,8 +42,9 @@ logger = logging.getLogger(__name__)
 
 router = Router()
 
-# Валидация имени пользователя
-USERNAME_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,64}$")
+# Пароль VPN попадает в inline-кнопки, а callback_data ограничена 64 байтами:
+# самый длинный шаблон user:editfield:{pwd}:max_down_mbps оставляет 35 байт
+PASSWORD_RE = re.compile(r"^[A-Za-z0-9_.\-]{1,35}$")
 
 
 def _is_command(message: Message) -> bool:
@@ -191,7 +193,7 @@ async def process_search(message: Message, state: FSMContext, config: Config):
     ]
 
     if not found:
-        await message.answer(f"Ничего не найдено по запросу: <b>{query}</b>")
+        await message.answer(f"Ничего не найдено по запросу: <b>{html.escape(query)}</b>")
         return
 
     text = format_users_list(found, page=0)
@@ -293,6 +295,15 @@ async def cb_user_view(cq: CallbackQuery, config: Config):
     await _safe_edit(cq, text, user_detail_kb(password, user.get("active", True)))
 
 
+@router.callback_query(F.data == "user:too_long")
+async def cb_user_too_long(cq: CallbackQuery):
+    await cq.answer(
+        "Пароль длиннее 35 символов не помещается в inline-кнопку Telegram "
+        "(лимит callback_data — 64 байта). Управляйте таким пользователем "
+        "через веб-панель.",
+        show_alert=True,
+    )
+
 # ─── User toggle ─────────────────────────────────────────────────────────────
 
 @router.callback_query(F.data.startswith("user:toggle:"))
@@ -326,7 +337,7 @@ async def cb_user_toggle(cq: CallbackQuery, config: Config):
 @router.callback_query(F.data.startswith("user:delete:"))
 async def cb_user_delete(cq: CallbackQuery):
     password = cq.data[len("user:delete:"):]
-    text = f"<b>⚠️ Удалить пользователя?</b>\n\nПароль: <code>{password}</code>"
+    text = f"<b>⚠️ Удалить пользователя?</b>\n\nПароль: <code>{html.escape(password)}</code>"
     await _safe_edit(cq, text, user_delete_confirm_kb(password))
 
 
@@ -367,7 +378,7 @@ async def cb_user_link(cq: CallbackQuery, config: Config):
 @router.callback_query(F.data.startswith("user:traffic:"))
 async def cb_user_traffic(cq: CallbackQuery):
     password = cq.data[len("user:traffic:"):]
-    text = f"<b>📊 Трафик — {password[:12]}…</b>\n\nВыберите период:"
+    text = f"<b>📊 Трафик — {html.escape(password[:12])}…</b>\n\nВыберите период:"
     await _safe_edit(cq, text, user_traffic_kb(password))
 
 
@@ -377,7 +388,7 @@ async def cb_user_traffic_period(cq: CallbackQuery, config: Config):
     password = parts[2]
     days = int(parts[3])
 
-    _client, srv = await get_client(config)
+    _client, srv = get_client(config)
 
     # Получаем историю из БД
     rows = await db.get_traffic_history(srv.name, password, days)
@@ -387,7 +398,7 @@ async def cb_user_traffic_period(cq: CallbackQuery, config: Config):
 
     delta = await db.get_traffic_delta(srv.name, password, days)
     text = (
-        f"<b>📊 Трафик — {password[:12]}…</b>\n"
+        f"<b>📊 Трафик — {html.escape(password[:12])}…</b>\n"
         f"Период: {days}д\n"
         f"Дельта: {fmt_bytes(delta['delta_bytes'])} ({delta['points']} точек)"
     )
@@ -400,7 +411,7 @@ async def cb_user_traffic_chart(cq: CallbackQuery, config: Config):
     password = parts[2]
     days = int(parts[3])
 
-    _client, srv = await get_client(config)
+    _client, srv = get_client(config)
 
     rows = await db.get_traffic_history(srv.name, password, days)
     if len(rows) < 2:
@@ -416,7 +427,7 @@ async def cb_user_traffic_chart(cq: CallbackQuery, config: Config):
         return
 
     photo = BufferedInputFile(buf.read(), filename="traffic.png")
-    await cq.message.answer_photo(photo, caption=f"📊 Трафик {password[:12]}… ({days}д)")
+    await cq.message.answer_photo(photo, caption=f"📊 Трафик {html.escape(password[:12])}… ({days}д)")
     await cq.answer()
 
 
@@ -462,10 +473,15 @@ async def adduser_password(message: Message, state: FSMContext):
     if _is_command(message):
         await state.clear()
         return
-    if message.text == "/gen":
-        pwd = secrets.token_urlsafe(12)
-    else:
-        pwd = message.text.strip()
+    # /skip здесь — автогенерация: пароль обязателен
+    text = (message.text or "").strip()
+    pwd = secrets.token_urlsafe(12) if text in ("/gen", "/skip") else text
+    if not PASSWORD_RE.fullmatch(pwd):
+        await message.answer(
+            "Пароль: 1–35 символов, латиница, цифры и знаки <code>_</code> <code>.</code> <code>-</code>\n"
+            "Введите снова или /gen для автогенерации:"
+        )
+        return
     await state.update_data(password=pwd)
     await message.answer("Срок действия в днях (0 = бессрочно) или /skip:")
     await state.set_state(AddUserFSM.expires_at)
@@ -581,14 +597,14 @@ async def adduser_vk_hash(message: Message, state: FSMContext):
 
     summary = (
         f"<b>Подтверждение:</b>\n\n"
-        f"Комментарий: {data.get('comment', '—')}\n"
-        f"Пароль: <code>{data['password']}</code>\n"
+        f"Комментарий: {html.escape(data.get('comment', '—'))}\n"
+        f"Пароль: <code>{html.escape(data['password'])}</code>\n"
         f"Срок: {expires_str}\n"
         f"Трафик: {traffic_str}\n"
         f"Устройства: {data.get('max_devices', 1)}\n"
         f"Max Down: {data.get('max_down_mbps', 0) or 'без лимита'} Mbps\n"
         f"Max Up: {data.get('max_up_mbps', 0) or 'без лимита'} Mbps\n"
-        f"VK Hash: {data.get('vk_hash', '—') or '—'}\n\n"
+        f"VK Hash: {html.escape(data.get('vk_hash', '—') or '—')}\n\n"
         f"Отправьте /confirm для создания или /cancel для отмены:"
     )
     await state.update_data(expires_at=expires_at)
@@ -630,7 +646,7 @@ async def adduser_confirm(message: Message, state: FSMContext, config: Config):
     if result is None:
         return
     pwd = result.get("password", data.get("password", ""))
-    await message.answer(f"✅ Пользователь создан\nПароль: <code>{pwd}</code>")
+    await message.answer(f"✅ Пользователь создан\nПароль: <code>{html.escape(pwd)}</code>")
 
 
 # ─── Edit user ────────────────────────────────────────────────────────────────
@@ -638,7 +654,7 @@ async def adduser_confirm(message: Message, state: FSMContext, config: Config):
 @router.callback_query(F.data.startswith("user:edit:"))
 async def cb_user_edit(cq: CallbackQuery):
     password = cq.data[len("user:edit:"):]
-    text = f"<b>✏️ Редактирование — {password[:12]}…</b>\n\nВыберите поле:"
+    text = f"<b>✏️ Редактирование — {html.escape(password[:12])}…</b>\n\nВыберите поле:"
     await _safe_edit(cq, text, user_edit_kb(password))
 
 
@@ -695,6 +711,11 @@ async def process_edit_field(message: Message, state: FSMContext, config: Config
                 await message.answer("Введите timestamp или дату YYYY-MM-DD:")
                 return
     elif field == "password":
+        if not PASSWORD_RE.fullmatch(value):
+            await message.answer(
+                "Пароль: 1–35 символов, латиница, цифры и знаки <code>_</code> <code>.</code> <code>-</code>. Введите снова:"
+            )
+            return
         payload["password"] = value
     else:
         payload[field] = value
@@ -712,7 +733,7 @@ async def process_edit_field(message: Message, state: FSMContext, config: Config
 
 @router.callback_query(F.data == "menu:inbound")
 async def cb_inbound(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(config)
+    client, srv = get_client(config)
     data = await _api_call(cq, client.get_inbound)
     if data is None:
         return
@@ -800,7 +821,7 @@ async def inbound_max_users(message: Message, state: FSMContext, config: Config)
 
     data = await state.get_data()
 
-    client, srv = await get_client(config)
+    client, srv = get_client(config)
 
     # Получаем текущий inbound для сохранения остальных полей.
     # Состояние не сбрасываем: при ошибке можно повторить или /cancel.
@@ -832,7 +853,7 @@ async def inbound_max_users(message: Message, state: FSMContext, config: Config)
 
 @router.callback_query(F.data == "menu:services")
 async def cb_services(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(config)
+    client, srv = get_client(config)
     status = await _api_call(cq, client.get_status)
     if status is None:
         return
@@ -855,7 +876,7 @@ async def cb_restart_xray(cq: CallbackQuery):
 
 @router.callback_query(F.data == "service:restart_wdtt_confirm")
 async def cb_restart_wdtt_confirm(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(config)
+    client, srv = get_client(config)
     result = await _api_call(cq, client.restart_wdtt)
     if result is None:
         return
@@ -864,7 +885,7 @@ async def cb_restart_wdtt_confirm(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "service:restart_xray_confirm")
 async def cb_restart_xray_confirm(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(config)
+    client, srv = get_client(config)
     result = await _api_call(cq, client.restart_xray)
     if result is None:
         return
@@ -875,7 +896,7 @@ async def cb_restart_xray_confirm(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "menu:xray")
 async def cb_xray_menu(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(config)
+    client, srv = get_client(config)
     status = await _api_call(cq, client.get_status)
     if status is None:
         return
@@ -888,7 +909,7 @@ async def cb_xray_menu(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "xray:config")
 async def cb_xray_config(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(config)
+    client, srv = get_client(config)
     data = await _api_call(cq, client.get_xray_config)
     if data is None:
         return
@@ -899,7 +920,7 @@ async def cb_xray_config(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "xray:versions")
 async def cb_xray_versions(cq: CallbackQuery, config: Config):
-    client, srv = await get_client(config)
+    client, srv = get_client(config)
     data = await _api_call(cq, client.get_xray_versions)
     if data is None:
         return
@@ -997,7 +1018,7 @@ async def cb_traffic_report_menu(cq: CallbackQuery):
 @router.callback_query(F.data.startswith("traffic_report:"))
 async def cb_traffic_report(cq: CallbackQuery, config: Config):
     days = int(cq.data.split(":")[1])
-    _client, srv = await get_client(config)
+    _client, srv = get_client(config)
 
     deltas = await db.get_all_users_traffic_delta(srv.name, days)
     if not deltas:
@@ -1006,7 +1027,7 @@ async def cb_traffic_report(cq: CallbackQuery, config: Config):
 
     text = f"<b>📊 Отчёт по трафику — {days}д</b>\n\n"
     for d in deltas[:10]:
-        text += f"• <code>{d['user_password'][:12]}</code>: {fmt_bytes(d['delta_bytes'])}\n"
+        text += f"• <code>{html.escape(d['user_password'][:12])}</code>: {fmt_bytes(d['delta_bytes'])}\n"
 
     await _safe_edit(cq, text, traffic_report_kb())
 
@@ -1014,7 +1035,7 @@ async def cb_traffic_report(cq: CallbackQuery, config: Config):
 @router.callback_query(F.data.startswith("traffic_report_chart:"))
 async def cb_traffic_report_chart(cq: CallbackQuery, config: Config):
     days = int(cq.data.split(":")[1])
-    _client, srv = await get_client(config)
+    _client, srv = get_client(config)
 
     deltas = await db.get_all_users_traffic_delta(srv.name, days)
     if not deltas:

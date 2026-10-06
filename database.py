@@ -73,12 +73,17 @@ async def init_db():
             "DELETE FROM traffic_history WHERE user_password GLOB '*[*][*][*][*]'"
         )
         await db.commit()
+    # История трафика хранит полные пароли VPN — ограничиваем доступ к файлу
+    try:
+        os.chmod(DB_PATH, 0o600)
+    except OSError:
+        pass
     logger.info("БД инициализирована: %s", DB_PATH)
 
 
 # ─── Трафик ───────────────────────────────────────────────────────────────────
 
-async def save_traffic_snapshot(server_name: str, users: list, inbound: dict):
+async def save_traffic_snapshot(server_name: str, users: list):
     now = _now()
     rows = []
     for u in users:

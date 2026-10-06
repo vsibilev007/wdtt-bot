@@ -12,8 +12,8 @@ from pathlib import Path
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
-from api_client import WdtClient, ApiError
 from config import Config
+from session import get_cached_client
 import database as db
 
 logger = logging.getLogger(__name__)
@@ -95,11 +95,10 @@ async def _collect_traffic():
         return
     for srv in _config.servers:
         try:
-            client = WdtClient(srv.url, srv.username, srv.password)
+            client = get_cached_client(srv)
             data = await client.get_users()
             users = data.get("users", [])
-            inbound = data.get("inbound", {})
-            await db.save_traffic_snapshot(srv.name, users, inbound)
+            await db.save_traffic_snapshot(srv.name, users)
             logger.debug("Трафик собран: %s (%d пользователей)", srv.name, len(users))
         except Exception as e:
             logger.warning("Ошибка сбора трафика %s: %s", srv.name, e)
@@ -114,7 +113,7 @@ async def _check_health():
 
     for srv in _config.servers:
         try:
-            client = WdtClient(srv.url, srv.username, srv.password)
+            client = get_cached_client(srv)
             status = await client.get_status()
 
             wdtt_active = status.get("wdtt_active", False)

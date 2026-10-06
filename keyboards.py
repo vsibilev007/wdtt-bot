@@ -54,7 +54,13 @@ def users_list_kb(
         pwd = u.get("password_key", "") or u.get("password", "")
         online = "🟢" if u.get("online") else ("⚪" if u.get("active") else "🔴")
         label = f"{online} {comment}" if comment else f"{online} {pwd[:12]}"
-        kb.button(text=label[:40], callback_data=f"user:view:{pwd}")
+        # Пароль длиннее 35 байт не влезает в callback_data (лимит Telegram 64
+        # байта, самый длинный шаблон user:editfield:{pwd}:max_down_mbps) —
+        # такую кнопку делаем неактивной с объяснением
+        if len(pwd.encode()) <= 35:
+            kb.button(text=label[:40], callback_data=f"user:view:{pwd}")
+        else:
+            kb.button(text=label[:40], callback_data="user:too_long")
 
     # Навигация
     nav = []
