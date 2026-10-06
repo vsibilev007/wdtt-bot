@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import html
+import json
 import logging
 import re
 import secrets
@@ -67,17 +68,18 @@ async def _api_call(target, func, *args, **kwargs):
         return await func(*args, **kwargs)
     except ApiError as e:
         msg = f"❌ Ошибка API: {e.message}"
+        # Лимит answerCallbackQuery — 200 символов, sendMessage — 4096
         if isinstance(target, CallbackQuery):
-            await target.answer(msg, show_alert=True)
+            await target.answer(msg[:200], show_alert=True)
         else:
-            await target.answer(msg)
+            await target.answer(msg[:4000])
         return None
     except Exception as e:
         msg = f"❌ Ошибка: {e}"
         if isinstance(target, CallbackQuery):
-            await target.answer(msg, show_alert=True)
+            await target.answer(msg[:200], show_alert=True)
         else:
-            await target.answer(msg)
+            await target.answer(msg[:4000])
         return None
 
 
@@ -909,13 +911,18 @@ async def cb_xray_menu(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "xray:config")
 async def cb_xray_config(cq: CallbackQuery, config: Config):
-    client, srv = get_client(config)
+    client, _srv = get_client(config)
     data = await _api_call(cq, client.get_xray_config)
     if data is None:
         return
 
     text = format_xray_config(data)
     await _safe_edit(cq, text, back_kb("menu:xray"))
+
+    # Полный конфиг — файлом: в сообщение он целиком не помещается
+    raw = json.dumps(data, indent=2, ensure_ascii=False).encode()
+    doc = BufferedInputFile(raw, filename="xray_config.json")
+    await cq.message.answer_document(doc, caption="📡 Полный конфиг Xray")
 
 
 @router.callback_query(F.data == "xray:versions")

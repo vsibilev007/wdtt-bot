@@ -273,8 +273,7 @@ def format_services(status: dict) -> str:
 # ─── Xray ─────────────────────────────────────────────────────────────────────
 
 def format_xray_config(config: dict) -> str:
-    """Форматирует Xray конфиг (сокращённо — полный конфиг слишком длинный)."""
-    import json
+    """Форматирует Xray конфиг (краткая сводка; полный конфиг уходит файлом)."""
     lines = ["<b>📡 Xray конфиг</b>\n"]
 
     # Показываем краткую сводку
@@ -302,15 +301,9 @@ def format_xray_config(config: dict) -> str:
     if servers:
         lines.append(f"DNS: {', '.join(str(s) for s in servers[:3])}")
 
-    # Полный JSON — только если помещается
-    try:
-        pretty = json.dumps(config, indent=2, ensure_ascii=False)
-        if len(pretty) <= 3000:
-            lines.append(f"\n<pre>{html.escape(pretty)}</pre>")
-        else:
-            lines.append(f"\n<i>Полный конфиг слишком длинный ({len(pretty)} символов)</i>")
-    except Exception:
-        pass
+    # Полный JSON не вставляем в сообщение (лимит Telegram 4096) —
+    # обработчик отправляет его отдельным файлом
+    lines.append("\n📎 Полный конфиг отправлен файлом xray_config.json")
 
     return "\n".join(lines)
 

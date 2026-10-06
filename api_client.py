@@ -148,7 +148,11 @@ class WdtClient:
                                 raise ApiError("http_error", f"HTTP {resp.status}: {text[:200]}", status=resp.status)
                             raise ApiError("parse_error", f"Ответ не JSON: {text[:200]}", status=resp.status)
 
-                        if not data.get("success"):
+                        # Не все эндпоинты завёрнуты в {success, obj}: например
+                        # GET /panel/api/xray/config отдаёт конфиг как есть
+                        if "success" not in data:
+                            return data
+                        if not data["success"]:
                             raise ApiError(
                                 code="api_error",
                                 message=data.get("msg", str(data)),
