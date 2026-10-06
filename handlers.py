@@ -26,13 +26,13 @@ from formatters import (
     format_status, format_users_list, format_user_detail, format_user_link,
     format_inbound, format_services, format_xray_config, format_xray_versions,
     format_alerts, format_alert_log, format_online_sessions, ALERT_TYPES,
-    fmt_bytes, build_user_links,
+    fmt_bytes,
 )
 from keyboards import (
     main_menu_kb, dashboard_kb, users_list_kb, user_detail_kb, user_edit_kb,
     user_delete_confirm_kb, user_traffic_kb, inbound_kb, services_kb,
     service_confirm_kb, xray_kb, alerts_kb, export_menu_kb, traffic_report_kb,
-    back_kb, links_copy_kb,
+    back_kb,
 )
 from session import get_client, get_cached_client
 import charts
@@ -373,15 +373,6 @@ async def cb_user_link(cq: CallbackQuery, config: Config):
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Назад", callback_data=f"user:view:{password}")
     await _safe_edit(cq, text, kb.as_markup())
-
-    # Reply-клавиатура с copy_text: нажатие кладёт ссылку в буфер обмена
-    # даже в клиентах, где тап по <code> не копирует (Desktop, Web)
-    copy_kb = links_copy_kb(build_user_links(user, inbound, config.csqtt_port))
-    if copy_kb:
-        await cq.message.answer(
-            "👇 Нажмите кнопку — ссылка скопируется в буфер обмена",
-            reply_markup=copy_kb,
-        )
 
 
 # ─── User traffic ─────────────────────────────────────────────────────────────

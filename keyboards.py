@@ -2,12 +2,7 @@
 Клавиатуры и inline-кнопки
 """
 
-from aiogram.types import (
-    CopyTextButton,
-    InlineKeyboardMarkup,
-    KeyboardButton,
-    ReplyKeyboardMarkup,
-)
+from aiogram.types import InlineKeyboardMarkup
 from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
@@ -244,31 +239,3 @@ def back_kb(callback_data: str = "menu:main") -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="◀️ Меню", callback_data=callback_data)
     return kb.as_markup()
-
-
-# ─── Копирование ссылок (reply-клавиатура: нажал — текст в буфере) ────────────
-
-def links_copy_kb(links: list[tuple[str, str]]) -> ReplyKeyboardMarkup | None:
-    """Reply-клавиатура с copy_text-кнопками (Bot API 9.0).
-
-    Нажатие кладёт ссылку в буфер обмена без отправки сообщения — работает
-    и там, где тап по <code> не копирует (Desktop, Web). Одинаковые ссылки
-    дедуплицируются; ссылки длиннее 256 символов в copy_text не помещаются
-    (лимит API) — для них остаётся тап-копирование по <code> в сообщении.
-    """
-    rows: list[list[KeyboardButton]] = []
-    row: list[KeyboardButton] = []
-    seen: set[str] = set()
-    for label, link in links:
-        if link in seen or not 0 < len(link) <= 256:
-            continue
-        seen.add(link)
-        row.append(KeyboardButton(text=f"📋 {label}", copy_text=CopyTextButton(text=link)))
-        if len(row) == 2:
-            rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
-    if not rows:
-        return None
-    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True, one_time_keyboard=True)
