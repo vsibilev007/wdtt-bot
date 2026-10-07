@@ -94,6 +94,7 @@ def user_detail_kb(password: str, active: bool = True) -> InlineKeyboardMarkup:
     kb.button(text="✏️ Редактировать", callback_data=f"user:edit:{password}")
 
     kb.button(text="🔗 Ссылка", callback_data=f"user:link:{password}")
+    kb.button(text="📱 Устройства", callback_data=f"user:devices:{password}")
 
     kb.button(text="📊 Трафик", callback_data=f"user:traffic:{password}")
     kb.button(text="🔄 Сброс трафика", callback_data=f"user:reset_traffic:{password}")
@@ -101,7 +102,7 @@ def user_detail_kb(password: str, active: bool = True) -> InlineKeyboardMarkup:
     kb.button(text="🗑 Удалить", callback_data=f"user:delete:{password}")
     kb.button(text="◀️ Назад", callback_data="menu:users")
 
-    kb.adjust(2, 1, 2, 2)
+    kb.adjust(2, 2, 2, 2)
     return kb.as_markup()
 
 
@@ -144,6 +145,22 @@ def user_traffic_kb(password: str) -> InlineKeyboardMarkup:
     return kb.as_markup()
 
 
+def user_devices_kb(password: str, device_count: int) -> InlineKeyboardMarkup:
+    """Кнопки управления устройствами: по одной на устройство (по индексу —
+    UUID устройства не влезает в callback_data вместе с паролем)."""
+    kb = InlineKeyboardBuilder()
+    for idx in range(device_count):
+        kb.button(text=f"🗑 Устройство {idx + 1}", callback_data=f"user:unbind:{password}:{idx}")
+    layout = [1] * device_count
+    if device_count:
+        kb.button(text="🗑 Отвязать все", callback_data=f"user:unbind_all:{password}")
+        layout.append(1)
+    kb.button(text="◀️ Назад", callback_data=f"user:view:{password}")
+    layout.append(1)
+    kb.adjust(*layout)
+    return kb.as_markup()
+
+
 # ─── Inbound ──────────────────────────────────────────────────────────────────
 
 def inbound_kb() -> InlineKeyboardMarkup:
@@ -167,9 +184,10 @@ def services_kb(status: dict = None) -> InlineKeyboardMarkup:
 
     kb.button(text=f"{wdtt_icon} Перезапустить WDTT", callback_data="service:restart_wdtt")
     kb.button(text=f"{xray_icon} Перезапустить Xray", callback_data="service:restart_xray")
+    kb.button(text="🔑 Главный пароль VPN", callback_data="password:main")
     kb.button(text="🔄 Обновить", callback_data="menu:services")
     kb.button(text="◀️ Меню", callback_data="menu:main")
-    kb.adjust(2, 2)
+    kb.adjust(2, 1, 2)
     return kb.as_markup()
 
 
@@ -187,9 +205,41 @@ def xray_kb() -> InlineKeyboardMarkup:
     kb = InlineKeyboardBuilder()
     kb.button(text="📄 Конфиг", callback_data="xray:config")
     kb.button(text="📦 Версии", callback_data="xray:versions")
+    kb.button(text="📥 Импорт конфига", callback_data="xray:import")
     kb.button(text="🔄 Обновить", callback_data="menu:xray")
     kb.button(text="◀️ Меню", callback_data="menu:main")
-    kb.adjust(2, 2)
+    kb.adjust(2, 1, 2)
+    return kb.as_markup()
+
+
+def xray_versions_kb(versions: list, current: str) -> InlineKeyboardMarkup:
+    """Кнопки установки версий Xray; установленная версия не нажимается."""
+    kb = InlineKeyboardBuilder()
+    count = 0
+    for tag in versions:
+        if tag == current:
+            continue
+        kb.button(text=f"⬇️ {tag}", callback_data=f"xray:install:{tag}")
+        count += 1
+    kb.button(text="◀️ Назад", callback_data="menu:xray")
+    rows = [2] * (count // 2) + ([1] if count % 2 else []) + [1]
+    kb.adjust(*rows)
+    return kb.as_markup()
+
+
+def xray_install_confirm_kb(tag: str) -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Да, установить", callback_data=f"xray:install_confirm:{tag}")
+    kb.button(text="❌ Отмена", callback_data="menu:xray")
+    kb.adjust(2)
+    return kb.as_markup()
+
+
+def xray_import_confirm_kb() -> InlineKeyboardMarkup:
+    kb = InlineKeyboardBuilder()
+    kb.button(text="✅ Применить", callback_data="xray:import_confirm")
+    kb.button(text="❌ Отмена", callback_data="xray:import_cancel")
+    kb.adjust(2)
     return kb.as_markup()
 
 

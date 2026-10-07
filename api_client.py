@@ -90,6 +90,7 @@ class WdtClient:
         path: str,
         json: Any = None,
         auto_login: bool = True,
+        timeout: aiohttp.ClientTimeout | None = None,
     ) -> dict:
         """HTTP request с auto-re-login на 401."""
         url = f"{self.base_url}{path}"
@@ -109,7 +110,7 @@ class WdtClient:
         sem = _get_semaphore(self.base_url)
         async with sem:
             try:
-                async with aiohttp.ClientSession(timeout=TIMEOUT) as session:
+                async with aiohttp.ClientSession(timeout=timeout or TIMEOUT) as session:
                     async with session.request(method, url, json=json, headers=headers) as resp:
                         # Если 401 — пробуем перелогиниться
                         if resp.status == 401 and auto_login:
@@ -117,6 +118,7 @@ class WdtClient:
                             if await self.login():
                                 return await self._request(
                                     method, path, json=json, auto_login=False,
+                                    timeout=timeout,
                                 )
                             raise ApiError("auth_failed", "Не удалось авторизоваться в WDTT")
 
@@ -136,6 +138,7 @@ class WdtClient:
                             if await self.login():
                                 return await self._request(
                                     method, path, json=json, auto_login=False,
+                                    timeout=timeout,
                                 )
                             raise ApiError("auth_failed", "Панель вернула HTML — авторизация не удалась")
 
@@ -237,8 +240,15 @@ class WdtClient:
         return await self._request("GET", "/panel/api/xray/versions")
 
     async def install_xray(self, tag: str) -> dict:
-        """POST /panel/api/xray/install/{tag} — установить версию Xray."""
-        return await self._request("POST", f"/panel/api/xray/install/{tag}")
+        """POST /panel/api/xray/install/{tag} — установить версию Xray.
+
+        Панель скачивает и распаковывает бинарь синхронно — запрос может
+        идти несколько минут, поэтому таймаут длиннее обычного.
+        """
+        return await self._request(
+            "POST", f"/panel/api/xray/install/{tag}",
+            timeout=aiohttp.ClientTimeout(total=180, connect=3),
+        )
 
     # ─── Ping ─────────────────────────────────────────────────────────────────
 

@@ -27,3 +27,13 @@ class InboundEditFSM(StatesGroup):
     client_port = State()
     dns = State()
     max_users = State()
+
+
+class MainPasswordFSM(StatesGroup):
+    waiting_value = State()
+    confirm = State()
+
+
+class XrayImportFSM(StatesGroup):
+    waiting_file = State()
+    confirm = State()

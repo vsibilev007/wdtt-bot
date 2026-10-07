@@ -51,11 +51,28 @@ def format_status(obj: dict, server_name: str = "") -> str:
     if stats:
         lines.append("")
         lines.append("<b>Статистика:</b>")
-        for key, val in stats.items():
-            if key == "online" and isinstance(val, list):
-                lines.append(f"  Онлайн сессий: {len(val)}")
-                continue
-            lines.append(f"  {html.escape(str(key))}: {html.escape(str(val))}")
+        if stats.get("uptime"):
+            lines.append(f"  Аптайм: {html.escape(str(stats['uptime']))}")
+        down, up, total = stats.get("down_gb"), stats.get("up_gb"), stats.get("total")
+        if down or up or total:
+            parts = []
+            if down:
+                parts.append(f"↓ {down}")
+            if up:
+                parts.append(f"↑ {up}")
+            line = "  Трафик: " + " / ".join(html.escape(str(p)) for p in parts)
+            if total:
+                line += f" (всего {fmt_bytes(total)})"
+            lines.append(line)
+        if stats.get("active_users") is not None:
+            lines.append(f"  Активных: {stats['active_users']}")
+        if stats.get("sessions") is not None:
+            lines.append(f"  Сессий: {stats['sessions']}")
+        online = stats.get("online")
+        if isinstance(online, list):
+            lines.append(f"  Онлайн-сессий: {len(online)}")
+        if stats.get("nat"):
+            lines.append(f"  NAT: {html.escape(str(stats['nat']))}")
 
     return "\n".join(lines)
 
@@ -217,6 +234,28 @@ def format_user_link(user: dict, inbound: dict = None, csqtt_port: int = 46000) 
     return "\n".join(lines)
 
 
+def format_user_devices(user: dict) -> str:
+    """Экран управления устройствами пользователя."""
+    comment = user.get("comment", "")
+    pwd = user.get("password_key", "") or user.get("password", "")
+    label = comment if comment else pwd[:16]
+
+    devices = user.get("device_ids", []) or []
+    max_dev = user.get("max_devices", 1)
+
+    lines = [f"<b>📱 Устройства — {html.escape(label)}</b>\n"]
+    lines.append(f"Привязано: <b>{len(devices)}/{max_dev}</b>\n")
+
+    if not devices:
+        lines.append("Нет привязанных устройств.")
+    else:
+        for i, dev in enumerate(devices, 1):
+            lines.append(f"{i}. <code>{html.escape(str(dev))}</code>")
+
+    lines.append("\n<i>Устройства привязываются автоматически при подключении клиента — после отвязки свободный слот займёт новое устройство.</i>")
+    return "\n".join(lines)
+
+
 # ─── Inbound ──────────────────────────────────────────────────────────────────
 
 def format_inbound(obj: dict) -> str:
@@ -302,17 +341,78 @@ def format_xray_config(config: dict) -> str:
     return "\n".join(lines)
 
 
-def format_xray_versions(versions: dict) -> str:
-    """Форматирует список версий Xray."""
-    lines = ["<b>📡 Версии Xray</b>\n"]
-    # Структура ответа зависит от WDTT
-    if isinstance(versions, list):
-        for v in versions[:20]:
-            lines.append(f"  • {html.escape(str(v))}")
-    elif isinstance(versions, dict):
-        for k, v in versions.items():
-            lines.append(f"  {html.escape(str(k))}: {html.escape(str(v))}")
+def format_xray_config_diff(current: dict | None, new: dict) -> str:
+    """Сводка изменений импортируемого Xray-конфига против текущего."""
+    lines = ["<b>📥 Импорт Xray конфига</b>\n"]
+
+    def _tags(cfg: dict, section: str) -> list:
+        return [str(e.get("tag", "?")) for e in (cfg.get(section) or []) if isinstance(e, dict)]
+
+    new_in, new_out = _tags(new, "inbounds"), _tags(new, "outbounds")
+    rules = len(((new.get("routing") or {}).get("rules")) or [])
+
+    if current:
+        cur_in, cur_out = _tags(current, "inbounds"), _tags(current, "outbounds")
+        cur_rules = len(((current.get("routing") or {}).get("rules")) or [])
+        lines.append(f"Inbounds: {len(cur_in)} → {len(new_in)}")
+        for t in [x for x in new_in if x not in cur_in]:
+            lines.append(f"  ➕ {html.escape(t)}")
+        for t in [x for x in cur_in if x not in new_in]:
+            lines.append(f"  ➖ {html.escape(t)}")
+        lines.append(f"Outbounds: {len(cur_out)} → {len(new_out)}")
+        for t in [x for x in new_out if x not in cur_out]:
+            lines.append(f"  ➕ {html.escape(t)}")
+        for t in [x for x in cur_out if x not in new_out]:
+            lines.append(f"  ➖ {html.escape(t)}")
+        lines.append(f"Routing rules: {cur_rules} → {rules}")
+    else:
+        lines.append(f"Inbounds: {len(new_in)}")
+        lines.append(f"Outbounds: {len(new_out)}")
+        lines.append(f"Routing rules: {rules}")
+
+    dns = ((new.get("dns") or {}).get("servers")) or []
+    if dns:
+        lines.append(f"DNS: {html.escape(', '.join(str(s) for s in dns[:3]))}")
+
+    lines.append("\n⚠️ После применения Xray перезапустится.")
     return "\n".join(lines)
+
+
+def format_xray_versions(versions: dict) -> tuple[str, str, list]:
+    """Форматирует список версий Xray.
+
+    Возвращает (текст, текущая_версия, список_тегов). Панель отдаёт
+    {"current": "...", "versions": [...]}; на случай другого формата
+    есть фолбэк.
+    """
+    lines = ["<b>📡 Версии Xray</b>\n"]
+
+    current = ""
+    tags: list = []
+    if isinstance(versions, dict):
+        current = str(versions.get("current", ""))
+        raw = versions.get("versions", [])
+        if isinstance(raw, list):
+            tags = [str(v) for v in raw]
+
+    if not tags:
+        # Фолбэк для нестандартного ответа
+        if isinstance(versions, list):
+            tags = [str(v) for v in versions]
+        elif isinstance(versions, dict):
+            tags = [str(k) for k in versions]
+
+    if not tags:
+        lines.append("Список версий недоступен.")
+        return "\n".join(lines), current, tags
+
+    if current:
+        lines.append(f"Установлена: <b>{html.escape(current)}</b>\n")
+    for tag in tags[:15]:
+        marker = " ✅" if tag == current else ""
+        lines.append(f"  • {html.escape(tag)}{marker}")
+
+    return "\n".join(lines), current, tags[:15]
 
 
 # ─── Alerts ───────────────────────────────────────────────────────────────────

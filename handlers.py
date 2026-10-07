@@ -5,13 +5,14 @@
 from __future__ import annotations
 
 import html
+import io
 import json
 import logging
 import re
 import secrets
 from datetime import datetime, timezone, timedelta
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import CommandStart, Command
 from aiogram.fsm.context import FSMContext
@@ -24,19 +25,20 @@ import database as db
 from export_utils import users_to_csv, users_to_xlsx
 from formatters import (
     format_status, format_users_list, format_user_detail, format_user_link,
-    format_inbound, format_services, format_xray_config, format_xray_versions,
-    format_alerts, format_alert_log, format_online_sessions, ALERT_TYPES,
-    fmt_bytes,
+    format_user_devices, format_inbound, format_services, format_xray_config,
+    format_xray_config_diff, format_xray_versions, format_alerts,
+    format_alert_log, format_online_sessions, ALERT_TYPES, fmt_bytes,
 )
 from keyboards import (
     main_menu_kb, dashboard_kb, users_list_kb, user_detail_kb, user_edit_kb,
-    user_delete_confirm_kb, user_traffic_kb, inbound_kb, services_kb,
-    service_confirm_kb, xray_kb, alerts_kb, export_menu_kb, traffic_report_kb,
-    back_kb,
+    user_delete_confirm_kb, user_traffic_kb, user_devices_kb, inbound_kb,
+    services_kb, service_confirm_kb, xray_kb, xray_versions_kb,
+    xray_install_confirm_kb, xray_import_confirm_kb, alerts_kb, export_menu_kb,
+    traffic_report_kb, back_kb,
 )
 from session import get_client, get_cached_client
 import charts
-from states import AddUserFSM, EditFieldFSM, SearchUserFSM, InboundEditFSM
+from states import AddUserFSM, EditFieldFSM, SearchUserFSM, InboundEditFSM, MainPasswordFSM, XrayImportFSM
 from database import set_alert, get_alert
 
 logger = logging.getLogger(__name__)
@@ -68,18 +70,25 @@ async def _api_call(target, func, *args, **kwargs):
         return await func(*args, **kwargs)
     except ApiError as e:
         msg = f"❌ Ошибка API: {e.message}"
-        # Лимит answerCallbackQuery — 200 символов, sendMessage — 4096
-        if isinstance(target, CallbackQuery):
-            await target.answer(msg[:200], show_alert=True)
-        else:
-            await target.answer(msg[:4000])
+        # Лимит answerCallbackQuery — 200 символов, sendMessage — 4096.
+        # answer может упасть, если callback уже отвечен (длительные действия)
+        try:
+            if isinstance(target, CallbackQuery):
+                await target.answer(msg[:200], show_alert=True)
+            else:
+                await target.answer(msg[:4000])
+        except Exception:
+            logger.debug("Не удалось показать ошибку API: %s", msg[:100])
         return None
     except Exception as e:
         msg = f"❌ Ошибка: {e}"
-        if isinstance(target, CallbackQuery):
-            await target.answer(msg[:200], show_alert=True)
-        else:
-            await target.answer(msg[:4000])
+        try:
+            if isinstance(target, CallbackQuery):
+                await target.answer(msg[:200], show_alert=True)
+            else:
+                await target.answer(msg[:4000])
+        except Exception:
+            logger.debug("Не удалось показать ошибку: %s", msg[:100])
         return None
 
 
@@ -92,7 +101,10 @@ async def _safe_edit(cq: CallbackQuery, text: str, reply_markup: InlineKeyboardM
     except Exception as e:
         logger.debug("Ошибка edit_text: %s", e)
     finally:
-        await cq.answer()
+        try:
+            await cq.answer()
+        except Exception:
+            pass  # callback уже отвечен (например, длительным действием)
 
 
 async def _fetch_users(config: Config) -> tuple[list[dict], dict]:
@@ -154,10 +166,10 @@ async def cmd_help(message: Message, state: FSMContext):
         "<b>/help</b> — Эта справка\n\n"
         "<b>Меню бота:</b>\n"
         "📊 <b>Dashboard</b> — статус сервисов, IP, количество пользователей\n"
-        "👥 <b>Пользователи</b> — список, создание, редактирование, удаление\n"
+        "👥 <b>Пользователи</b> — список, создание, редактирование, удаление, устройства\n"
         "🔧 <b>Inbound</b> — настройки подключения (порты, DNS)\n"
-        "🔄 <b>Сервисы</b> — перезапуск WDTT и Xray\n"
-        "📡 <b>Xray</b> — конфиг и версии Xray\n"
+        "🔄 <b>Сервисы</b> — перезапуск WDTT и Xray, смена главного пароля VPN\n"
+        "📡 <b>Xray</b> — конфиг (просмотр/импорт), версии и обновление\n"
         "🚨 <b>Алерты</b> — уведомления при проблемах\n"
         "➕ <b>Новый клиент</b> — создание пользователя\n"
         "📤 <b>Экспорт</b> — выгрузка в CSV/Excel\n"
@@ -445,6 +457,91 @@ async def cb_user_reset_traffic(cq: CallbackQuery, config: Config):
 
     await cq.answer("✅ Трафик сброшен")
     await cb_user_view(cq, config)
+
+
+# ─── User devices ────────────────────────────────────────────────────────────
+
+async def _find_user(config: Config, password: str) -> tuple[dict | None, list]:
+    """Пользователь по паролю + полный список (None — ошибка API)."""
+    users, _inbound = await _fetch_users(config)
+    user = next(
+        (u for u in users if (u.get("password_key", "") or u.get("password", "")) == password),
+        None,
+    )
+    return user, users
+
+
+@router.callback_query(F.data.startswith("user:devices:"))
+async def cb_user_devices(cq: CallbackQuery, config: Config):
+    password = cq.data[len("user:devices:"):]
+
+    result = await _api_call(cq, _find_user, config, password)
+    if result is None:
+        return
+    user, _users = result
+    if not user:
+        await cq.answer("Пользователь не найден", show_alert=True)
+        return
+
+    devices = user.get("device_ids", []) or []
+    text = format_user_devices(user)
+    await _safe_edit(cq, text, user_devices_kb(password, len(devices)))
+
+
+@router.callback_query(F.data.startswith("user:unbind_all:"))
+async def cb_user_unbind_all(cq: CallbackQuery, config: Config):
+    password = cq.data[len("user:unbind_all:"):]
+
+    result = await _api_call(cq, _find_user, config, password)
+    if result is None:
+        return
+    user, _users = result
+    if not user:
+        await cq.answer("Пользователь не найден", show_alert=True)
+        return
+
+    client, _srv = get_client(config)
+    # Пустой device_ids отвязывает все устройства (см. docs/API.md users/update)
+    if await _api_call(cq, client.update_user, old_password=password, device_ids=[]) is None:
+        return
+
+    await cq.answer("✅ Все устройства отвязаны")
+    await cb_user_devices(cq, config)
+
+
+@router.callback_query(F.data.startswith("user:unbind:"))
+async def cb_user_unbind(cq: CallbackQuery, config: Config):
+    # user:unbind:{password}:{idx} — UUID не влезает в callback_data
+    payload = cq.data[len("user:unbind:"):]
+    password, _, idx_raw = payload.rpartition(":")
+    try:
+        idx = int(idx_raw)
+    except ValueError:
+        await cq.answer("Ошибка", show_alert=True)
+        return
+
+    result = await _api_call(cq, _find_user, config, password)
+    if result is None:
+        return
+    user, _users = result
+    if not user:
+        await cq.answer("Пользователь не найден", show_alert=True)
+        return
+
+    devices = list(user.get("device_ids", []) or [])
+    if idx < 0 or idx >= len(devices):
+        await cq.answer("Список устройств изменился — откройте экран заново", show_alert=True)
+        return
+
+    removed = devices.pop(idx)
+
+    client, _srv = get_client(config)
+    # Удаление из device_ids отвязывает устройство при сохранении
+    if await _api_call(cq, client.update_user, old_password=password, device_ids=devices) is None:
+        return
+
+    await cq.answer(f"✅ Устройство {str(removed)[:8]}… отвязано")
+    await cb_user_devices(cq, config)
 
 
 # ─── Add user (FSM) ──────────────────────────────────────────────────────────
@@ -927,13 +1024,194 @@ async def cb_xray_config(cq: CallbackQuery, config: Config):
 
 @router.callback_query(F.data == "xray:versions")
 async def cb_xray_versions(cq: CallbackQuery, config: Config):
-    client, srv = get_client(config)
+    client, _srv = get_client(config)
     data = await _api_call(cq, client.get_xray_versions)
     if data is None:
         return
 
-    text = format_xray_versions(data)
-    await _safe_edit(cq, text, back_kb("menu:xray"))
+    text, current, tags = format_xray_versions(data)
+    await _safe_edit(cq, text, xray_versions_kb(tags, current))
+
+
+@router.callback_query(F.data.startswith("xray:install:"))
+async def cb_xray_install(cq: CallbackQuery):
+    tag = cq.data[len("xray:install:"):]
+    text = (
+        f"<b>⚠️ Установить Xray {html.escape(tag)}?</b>\n\n"
+        "Панель скачает и распакует бинарник (может занять пару минут), "
+        "затем перезапустит Xray."
+    )
+    await _safe_edit(cq, text, xray_install_confirm_kb(tag))
+
+
+@router.callback_query(F.data.startswith("xray:install_confirm:"))
+async def cb_xray_install_confirm(cq: CallbackQuery, config: Config):
+    tag = cq.data[len("xray:install_confirm:"):]
+    # Отвечаем сразу: установка идёт синхронно и может длиться минуты
+    await cq.answer("⏳ Скачиваю и устанавливаю — это может занять пару минут…")
+    try:
+        await cq.message.edit_text(f"⏳ Устанавливаю Xray {html.escape(tag)}…")
+    except Exception:
+        pass
+
+    client, _srv = get_client(config)
+    result = await _api_call(cq, client.install_xray, tag)
+    if result is None:
+        return
+
+    try:
+        await cq.message.edit_text(
+            f"✅ Xray {html.escape(tag)} установлен, сервис перезапускается",
+            reply_markup=back_kb("menu:xray"),
+        )
+    except Exception as e:
+        logger.debug("Ошибка edit_text после установки: %s", e)
+
+
+# ─── Main VPN password ────────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "password:main")
+async def cb_main_password(cq: CallbackQuery, state: FSMContext):
+    await cq.answer()
+    await cq.message.answer(
+        "🔑 <b>Смена главного пароля VPN</b>\n\n"
+        "Введите новый пароль (1–35 символов, латиница, цифры, <code>_ . -</code>):"
+    )
+    await state.set_state(MainPasswordFSM.waiting_value)
+
+
+@router.message(MainPasswordFSM.waiting_value)
+async def mainpwd_value(message: Message, state: FSMContext):
+    if _is_command(message):
+        await state.clear()
+        return
+    value = (message.text or "").strip()
+    if not PASSWORD_RE.fullmatch(value):
+        await message.answer(
+            "Пароль: 1–35 символов, латиница, цифры и знаки <code>_</code> <code>.</code> <code>-</code>. Введите снова:"
+        )
+        return
+    await state.update_data(new_main_password=value)
+    await state.set_state(MainPasswordFSM.confirm)
+    await message.answer(
+        f"<b>⚠️ Сменить главный пароль VPN?</b>\n\n"
+        f"Новый пароль: <code>{html.escape(value)}</code>\n\n"
+        "После смены <b>все текущие ссылки клиентов перестанут работать</b> — "
+        "придётся раздать новые (кнопка 🔗 Ссылка в карточке).\n\n"
+        "Отправьте /confirm для смены или /cancel для отмены:"
+    )
+
+
+@router.message(MainPasswordFSM.confirm)
+async def mainpwd_confirm(message: Message, state: FSMContext, config: Config):
+    if (message.text or "").strip() != "/confirm":
+        await state.clear()
+        await message.answer("❌ Отменено.")
+        return
+
+    data = await state.get_data()
+    value = data.get("new_main_password", "")
+    await state.clear()
+
+    if not value:
+        await message.answer("❌ Отменено.")
+        return
+
+    client, _srv = get_client(config)
+    if await _api_call(message, client.change_main_password, value) is None:
+        return
+
+    await message.answer(
+        f"✅ Главный пароль изменён: <code>{html.escape(value)}</code>\n\n"
+        "Выдайте клиентам новые ссылки: Пользователи → карточка → 🔗 Ссылка."
+    )
+
+
+# ─── Xray config import ───────────────────────────────────────────────────────
+
+@router.callback_query(F.data == "xray:import")
+async def cb_xray_import(cq: CallbackQuery, state: FSMContext):
+    await cq.answer()
+    await cq.message.answer(
+        "📥 <b>Импорт Xray-конфига</b>\n\n"
+        "Отправьте JSON-файл конфигурации документом "
+        "(текущий можно скачать: Xray → 📄 Конфиг).\n"
+        "Бот проверит файл, покажет сводку изменений и попросит подтверждение.\n\n"
+        "/cancel — отмена"
+    )
+    await state.set_state(XrayImportFSM.waiting_file)
+
+
+@router.message(XrayImportFSM.waiting_file, F.document)
+async def xray_import_file(message: Message, state: FSMContext, config: Config, bot: Bot):
+    doc = message.document
+    if doc.file_size and doc.file_size > 10 * 1024 * 1024:
+        await message.answer("Файл слишком большой (лимит 10 MB). Отправьте другой или /cancel.")
+        return
+
+    buf = io.BytesIO()
+    await bot.download(doc, destination=buf)
+    try:
+        new_cfg = json.loads(buf.getvalue().decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as e:
+        await message.answer(f"❌ Это не JSON: {e}. Отправьте файл ещё раз или /cancel.")
+        return
+
+    if not isinstance(new_cfg, dict) or not isinstance(new_cfg.get("inbounds"), list):
+        await message.answer(
+            "❌ Это не похоже на конфиг Xray: нет ключа <code>inbounds</code> "
+            "со списком. Отправьте другой файл или /cancel."
+        )
+        return
+
+    client, _srv = get_client(config)
+    try:
+        current = await client.get_xray_config()
+    except Exception:
+        current = None
+
+    await state.update_data(xray_new_config=new_cfg)
+    await state.set_state(XrayImportFSM.confirm)
+
+    summary = format_xray_config_diff(current, new_cfg)
+    await message.answer(
+        summary + "\n\n<b>Применить этот конфиг?</b>",
+        reply_markup=xray_import_confirm_kb(),
+    )
+
+
+@router.message(XrayImportFSM.waiting_file)
+async def xray_import_not_a_file(message: Message, state: FSMContext):
+    if _is_command(message):
+        await state.clear()
+        return
+    await message.answer("Отправьте конфиг файлом (документом) или /cancel.")
+
+
+@router.callback_query(F.data == "xray:import_confirm")
+async def cb_xray_import_confirm(cq: CallbackQuery, state: FSMContext, config: Config):
+    data = await state.get_data()
+    new_cfg = data.get("xray_new_config")
+    if not new_cfg:
+        await cq.answer("Импорт неактуален — начните заново (Xray → 📥 Импорт)", show_alert=True)
+        return
+    await state.clear()
+
+    client, _srv = get_client(config)
+    if await _api_call(cq, client.save_xray_config, new_cfg) is None:
+        return
+
+    await _safe_edit(
+        cq,
+        "✅ Конфиг применён, Xray перезапускается",
+        back_kb("menu:xray"),
+    )
+
+
+@router.callback_query(F.data == "xray:import_cancel")
+async def cb_xray_import_cancel(cq: CallbackQuery, state: FSMContext):
+    await state.clear()
+    await _safe_edit(cq, "❌ Импорт отменён", xray_kb())
 
 
 # ─── Alerts ───────────────────────────────────────────────────────────────────
