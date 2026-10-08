@@ -161,7 +161,11 @@ class WdtClient:
                                 message=data.get("msg", str(data)),
                                 status=resp.status,
                             )
-                        return data.get("obj", {})
+                        # Панель отвечает jsonOK(nil) → {"obj": null}: .get(key,
+                        # {}) тут вернул бы None, и обработчики приняли бы
+                        # успех за ошибку API
+                        obj = data.get("obj")
+                        return obj if obj is not None else {}
             except aiohttp.ServerTimeoutError:
                 raise ApiError("timeout", "Нет ответа от API за 10с")
             except aiohttp.ClientConnectorError as e:
