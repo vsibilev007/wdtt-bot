@@ -563,7 +563,10 @@ async def adduser_comment(message: Message, state: FSMContext):
         return
     comment = message.text.strip() if message.text != "/skip" else ""
     await state.update_data(comment=comment)
-    await message.answer("Введите пароль или /gen для автогенерации:")
+    await message.answer(
+        "Введите пароль или /gen для автогенерации.\n"
+        "Пример: <code>2L3G5WtqrAWu8Peu</code> — 16 символов, латиница и цифры:"
+    )
     await state.set_state(AddUserFSM.password)
 
 
@@ -776,7 +779,13 @@ async def cb_user_editfield(cq: CallbackQuery, state: FSMContext):
 
     await state.update_data(edit_password=password, edit_field=field)
     await cq.answer()
-    await cq.message.answer(f"Введите новое значение для <b>{field_name}</b>:")
+    if field == "password":
+        await cq.message.answer(
+            "Введите новый пароль или /gen для автогенерации.\n"
+            "Пример: <code>2L3G5WtqrAWu8Peu</code> — 16 символов, латиница и цифры:"
+        )
+    else:
+        await cq.message.answer(f"Введите новое значение для <b>{field_name}</b>:")
     await state.set_state(EditFieldFSM.waiting_value)
 
 
@@ -786,7 +795,11 @@ async def process_edit_field(message: Message, state: FSMContext, config: Config
 
     password = data.get("edit_password", "")
     field = data.get("edit_field", "")
-    value = message.text.strip()
+    value = (message.text or "").strip()
+
+    # /gen — автогенерация пароля, как в мастере создания
+    if field == "password" and value == "/gen":
+        value = secrets.token_urlsafe(12)
 
     payload = {"old_password": password}
 
@@ -812,7 +825,8 @@ async def process_edit_field(message: Message, state: FSMContext, config: Config
     elif field == "password":
         if not PASSWORD_RE.fullmatch(value):
             await message.answer(
-                "Пароль: 1–35 символов, латиница, цифры и знаки <code>_</code> <code>.</code> <code>-</code>. Введите снова:"
+                "Пароль: 1–35 символов, латиница, цифры и знаки <code>_</code> <code>.</code> <code>-</code> "
+                "(или /gen для автогенерации). Введите снова:"
             )
             return
         payload["password"] = value
@@ -825,7 +839,14 @@ async def process_edit_field(message: Message, state: FSMContext, config: Config
     if result is None:
         return
     await state.clear()
-    await message.answer("✅ Пользователь обновлён")
+    if field == "password":
+        await message.answer(
+            f"✅ Пароль изменён: <code>{html.escape(value)}</code>\n"
+            "Старые ссылки этого клиента больше не работают — выдайте новые "
+            "(кнопка 🔗 Ссылка в карточке)."
+        )
+    else:
+        await message.answer("✅ Пользователь обновлён")
 
 
 # ─── Inbound ──────────────────────────────────────────────────────────────────
