@@ -325,11 +325,10 @@ async def cb_user_toggle(cq: CallbackQuery, config: Config):
     password = cq.data[len("user:toggle:"):]
 
     # Получаем текущее состояние
-    users, _inbound = await _api_call(cq, _fetch_users, config)
-    if users is None:
+    result = await _api_call(cq, _find_user, config, password)
+    if result is None:
         return
-
-    user = next((u for u in users if (u.get("password_key", "") or u.get("password", "")) == password), None)
+    user, _users = result
     if not user:
         await cq.answer("Пользователь не найден", show_alert=True)
         return
@@ -337,7 +336,7 @@ async def cb_user_toggle(cq: CallbackQuery, config: Config):
     new_active = not user.get("active", True)
 
     client, _srv = get_client(config)
-    result = await _api_call(cq, client.update_user, old_password=password, active=new_active)
+    result = await _api_call(cq, client.update_user, **_full_user_payload(user, active=new_active))
     if result is None:
         return
 
@@ -471,6 +470,34 @@ async def _find_user(config: Config, password: str) -> tuple[dict | None, list]:
     return user, users
 
 
+def _full_user_payload(user: dict, **changes) -> dict:
+    """Полный payload для users/update из текущего состояния.
+
+    Панель ПЕРЕЗАПИСЫВАЕТ все поля записи (store_admin.go:
+    applyPanelUserUpdateLocked) — не переданный comment/expires_at/
+    total_gb/max_down_mbps/max_up_mbps/vk_hash обнуляется, а без
+    active пользователь деактивируется. Поэтому шлём всё.
+
+    device_ids и max_devices НЕ включаем без нужды: отсутствующий
+    device_ids сохраняет привязанные устройства (manageDevices=false),
+    max_devices=0 тоже сохраняет текущее значение.
+    """
+    active = user.get("active")
+    payload = {
+        "old_password": user.get("password_key", "") or user.get("password", ""),
+        "comment": str(user.get("comment", "") or ""),
+        "expires_at": int(user.get("expires_at", 0) or 0),
+        "total_gb": float(user.get("total_gb", 0) or 0),
+        "max_down_mbps": float(user.get("max_down_mbps", 0) or 0),
+        "max_up_mbps": float(user.get("max_up_mbps", 0) or 0),
+        "vk_hash": str(user.get("vk_hash", "") or ""),
+        # отсутствие флага трактуем как «активен»: панель без active деактивирует
+        "active": True if active is None else bool(active),
+    }
+    payload.update(changes)
+    return payload
+
+
 @router.callback_query(F.data.startswith("user:devices:"))
 async def cb_user_devices(cq: CallbackQuery, config: Config):
     password = cq.data[len("user:devices:"):]
@@ -502,7 +529,7 @@ async def cb_user_unbind_all(cq: CallbackQuery, config: Config):
 
     client, _srv = get_client(config)
     # Пустой device_ids отвязывает все устройства (см. docs/API.md users/update)
-    if await _api_call(cq, client.update_user, old_password=password, device_ids=[]) is None:
+    if await _api_call(cq, client.update_user, **_full_user_payload(user, device_ids=[])) is None:
         return
 
     await cq.answer("✅ Все устройства отвязаны")
@@ -537,7 +564,7 @@ async def cb_user_unbind(cq: CallbackQuery, config: Config):
 
     client, _srv = get_client(config)
     # Удаление из device_ids отвязывает устройство при сохранении
-    if await _api_call(cq, client.update_user, old_password=password, device_ids=devices) is None:
+    if await _api_call(cq, client.update_user, **_full_user_payload(user, device_ids=devices)) is None:
         return
 
     await cq.answer(f"✅ Устройство {str(removed)[:8]}… отвязано")
@@ -801,24 +828,22 @@ async def process_edit_field(message: Message, state: FSMContext, config: Config
     if field == "password" and value == "/gen":
         value = secrets.token_urlsafe(12)
 
-    payload = {"old_password": password}
-
     # Конвертация значений — при ошибке состояние сохраняем, можно повторить
     if field in ("total_gb", "max_devices", "max_down_mbps", "max_up_mbps"):
         try:
-            payload[field] = int(value)
+            value = int(value)
         except ValueError:
             await message.answer("Введите число:")
             return
     elif field == "expires_at":
         try:
             # Пробуем как timestamp
-            payload[field] = int(value)
+            value = int(value)
         except ValueError:
             # Пробуем как дату
             try:
                 dt = datetime.strptime(value, "%Y-%m-%d")
-                payload[field] = int(dt.replace(tzinfo=timezone.utc).timestamp())
+                value = int(dt.replace(tzinfo=timezone.utc).timestamp())
             except ValueError:
                 await message.answer("Введите timestamp или дату YYYY-MM-DD:")
                 return
@@ -829,9 +854,20 @@ async def process_edit_field(message: Message, state: FSMContext, config: Config
                 "(или /gen для автогенерации). Введите снова:"
             )
             return
-        payload["password"] = value
-    else:
-        payload[field] = value
+    # строковые поля (comment) — без конвертации
+
+    # Панель перезаписывает ВСЕ поля users/update, поэтому тянем текущее
+    # состояние и меняем в нём только выбранное поле
+    result = await _api_call(message, _find_user, config, password)
+    if result is None:
+        return
+    user, _users = result
+    if not user:
+        await state.clear()
+        await message.answer("❌ Пользователь не найден — возможно, был удалён.")
+        return
+
+    payload = _full_user_payload(user, **{field: value})
 
     client, _srv = get_client(config)
 

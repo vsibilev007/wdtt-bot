@@ -386,7 +386,7 @@ wdtt://host:dtls_port:wg_port:local_port:password:vk_hash[#имя]
 | POST | `/panel/api/inbound/save` | Сохранить inbound |
 | GET | `/panel/api/users` | Список пользователей |
 | POST | `/panel/api/users/add` | Создать пользователя |
-| POST | `/panel/api/users/update` | Обновить пользователя |
+| POST | `/panel/api/users/update` | Обновить пользователя (все поля) |
 | POST | `/panel/api/users/delete` | Удалить пользователя |
 | POST | `/panel/api/users/reset-traffic` | Сбросить трафик |
 | POST | `/panel/api/server/restartWdttService` | Перезапуск WDTT |
@@ -396,6 +396,8 @@ wdtt://host:dtls_port:wg_port:local_port:password:vk_hash[#имя]
 | GET | `/panel/api/xray/versions` | Версии Xray |
 | POST | `/panel/api/xray/install/{tag}` | Установить версию Xray |
 | POST | `/panel/api/password/main` | Сменить главный пароль VPN |
+
+> ⚠️ `users/update` — это **полная замена**, а не частичное обновление: не переданные `comment`/`expires_at`/`total_gb`/`max_*_mbps`/`vk_hash` обнуляются, а без явного `active` пользователь деактивируется. Бот поэтому всегда шлёт полный payload из текущего состояния (`_full_user_payload` в `handlers.py`). Не трогаются только `device_ids` (отсутствующее поле сохраняет привязки) и `max_devices` (0 = без изменений).
 
 ---
 
